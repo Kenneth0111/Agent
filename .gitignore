@@ -1,0 +1,22 @@
+# Local credentials and generated files
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+.cache/
+.local/
+.superpowers/
+.worktrees/
+node_modules/
+dist/
+target/
+*.log
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Personal reference material; never publish with application sources
+/Java开发.md
