@@ -12,7 +12,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @SpringBootTest
 @AutoConfigureMockMvc
-class HealthEndpointTest {
+class HealthEndpointTest extends IntegrationTestSupport {
     @Autowired
     private MockMvc mvc;
 

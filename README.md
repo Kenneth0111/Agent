@@ -12,12 +12,21 @@
 
 ## 启动
 
+先启动 Docker Desktop，再从项目根目录初始化专用开发依赖：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy RemoteSigned -File scripts/init-dev.ps1
+docker compose -f compose.dev.yml up -d --wait
+```
+
+初始化脚本只在 `.env` 不存在时生成随机密码，不会覆盖已有凭据。`RemoteSigned` 只作用于该 PowerShell 进程，不修改系统策略。MySQL 使用 13306，Redis 使用 16379，仅绑定本机，使用本项目独立数据卷。`docker compose -f compose.dev.yml stop` 可停止服务而保留数据。
+
 从项目根目录打开两个终端。
 
 后端：
 
 ```powershell
-mvn -f backend/pom.xml spring-boot:run
+powershell -NoProfile -ExecutionPolicy RemoteSigned -File scripts/start-backend.ps1
 ```
 
 前端：
@@ -31,7 +40,9 @@ npm --prefix frontend run dev
 
 关闭后端再点击“重新检查”，页面应显示无法连接；恢复后端再试，应恢复已连接。服务状态不代表登录、模型或抖音能力已接通。
 
-后端可通过进程环境变量设置 `SERVER_ADDRESS` 和 `SERVER_PORT`；修改后端端口时同步调整 `frontend/vite.config.ts` 的代理地址。`.env.example` 仅是配置说明，Spring Boot 不会自动加载项目根目录 `.env`。
+后端可通过进程环境变量设置 `SERVER_ADDRESS` 和 `SERVER_PORT`；修改后端端口时同步调整 `frontend/vite.config.ts` 的代理地址。`.env.example` 是配置说明；启动脚本会把 `.env` 导入子进程，Spring Boot 本身不会自动读取它。Linux 环境可以导出相同变量后运行 Maven。
+
+启动时由 Flyway 执行版本化数据库迁移，Hibernate 只校验结构。当前用户表不包含默认账号或可用于登录的固定密码。
 
 ## 验证
 
@@ -42,7 +53,9 @@ npm --prefix frontend test
 npm --prefix frontend run build
 ```
 
-前端测试覆盖后端正常、网络失败及重试、HTTP 错误、异常 JSON 和代理返回 HTML 的状态处理。后端测试验证健康地址契约及管理端点不泄露内部环境。
+后端测试需要运行中的 Docker：Testcontainers 自动建立并回收独立的 MySQL/Redis 临时容器，不读取开发 `.env`，也不连接开发或生产数据库。首次运行需下载镜像。测试验证健康接口、用户表读写与邮箱唯一性、Redisson 读写和 TTL。
+
+前端测试覆盖后端正常、网络失败及重试、HTTP 错误、异常 JSON 和代理返回 HTML 的状态处理。
 
 ## 进度与提交
 
