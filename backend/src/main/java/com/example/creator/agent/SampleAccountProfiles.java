@@ -3,10 +3,8 @@ package com.example.creator.agent;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import org.springframework.stereotype.Component;
 
-/** Placeholder directory until W2-D2 stores real accounts; every user sees only its own samples. */
-@Component
+/** Test fixture for workflow tests; application accounts are stored in MySQL. */
 public class SampleAccountProfiles implements AccountProfiles {
     private final Map<Long, List<AccountProfile>> byOwner = new ConcurrentHashMap<>();
 

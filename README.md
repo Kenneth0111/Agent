@@ -2,7 +2,7 @@
 
 一个逐步开发中的 Java 内容创作与运营 Agent。目标是支持资料检索、选题、脚本、周排期及基于真实数据的复盘。
 
-当前已支持登录、退出、当前用户身份和服务连接检查，并接入 MySQL、Redis/Redisson。模型网关已按 DeepSeek 的 OpenAI 兼容接口实现，但本机尚无可用凭据，真实调用未验收。抖音接入和 AI 生成功能仍在后续计划中。
+当前已支持邀请注册、登录、退出、按用户隔离的内部内容账号配置和服务连接检查，并接入 MySQL、Redis/Redisson。模型网关已按 DeepSeek 的 OpenAI 兼容接口实现，但本机尚无可用凭据，真实调用未验收。抖音数据接入和完整内容生成功能仍在后续计划中。
 
 ## 本地环境
 
@@ -87,7 +87,7 @@ powershell -NoProfile -ExecutionPolicy RemoteSigned -File scripts/verify-model.p
 
 `read_account_profile` 是只读工具，返回账号的定位、栏目和每周条数。工具实例在每次运行时用登录得到的 userId 构造，模型给出的 `accountId` 只能在该用户自己的账号里查找；不属于本人的账号与不存在的账号都返回 `ACCOUNT_NOT_FOUND`，不泄漏其他用户是否有该账号。未知工具名返回 `UNKNOWN_TOOL`，参数不可解析返回 `TOOL_ARGUMENTS_INVALID`，两种情况都交回模型说明而不是直接执行。
 
-账号配置目前是内存中的示例数据，W2-D2 建表后替换为真实账号。
+账号配置保存在 MySQL 的 `content_accounts` 表。登录用户可从页面创建、查看和编辑多个内部内容账号，字段包括名称、目标受众、定位、栏目和每周条数。建档不要求先注册或授权抖音账号。`GET /api/accounts`、`GET /api/accounts/{id}`、`POST /api/accounts` 和 `PUT /api/accounts/{id}` 均从登录态取得 ownerId；其他用户的账号详情和修改统一返回 404。开发环境仅在示例用户还没有账号时创建 Java 八股与托福跟读账号及独立测试号，正式环境没有示例账号。Agent 的只读账号工具使用同一数据库目录。
 
 `ContentWorkflow` 用 LangGraph4j 串联读取账号配置和生成摘要两个节点。工具调用最多 3 轮，超出按 `AGENT_TOOL_LIMIT` 结束；图另有步数上限作为第二道保护，因此不会无限调用。工具执行在日志中记录工具名、状态和耗时。
 

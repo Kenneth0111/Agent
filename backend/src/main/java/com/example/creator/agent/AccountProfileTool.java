@@ -43,7 +43,7 @@ public class AccountProfileTool implements LocalTool {
                 .orElseThrow(() -> new ToolRejection("ACCOUNT_NOT_FOUND"));
         try {
             return json.writeValueAsString(Map.of(
-                    "accountId", profile.id(), "name", profile.name(),
+                    "accountId", profile.id(), "name", profile.name(), "audience", profile.audience(),
                     "positioning", profile.positioning(), "columns", profile.columns(),
                     "weeklyTarget", profile.weeklyTarget()));
         } catch (JsonProcessingException unexpected) {

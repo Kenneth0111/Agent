@@ -30,7 +30,7 @@ public class AgentController {
     @GetMapping("/accounts")
     public List<AccountView> accounts() {
         return accounts.ownedBy(currentUser.id()).stream()
-                .map(profile -> new AccountView(profile.id(), profile.name(), profile.positioning(),
+                .map(profile -> new AccountView(profile.id(), profile.name(), profile.audience(), profile.positioning(),
                         profile.columns(), profile.weeklyTarget()))
                 .toList();
     }
@@ -78,7 +78,8 @@ public class AgentController {
     }
 
     public record SummaryRequest(String accountId) { }
-    public record AccountView(String id, String name, String positioning, List<String> columns, int weeklyTarget) { }
+    public record AccountView(String id, String name, String audience, String positioning,
+                              List<String> columns, int weeklyTarget) { }
     public record SummaryView(String accountId, String summary) { }
     public record ErrorView(String code) { }
 }

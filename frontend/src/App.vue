@@ -3,10 +3,12 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import LoginPage from './pages/LoginPage.vue'
 import ChatPage from './pages/ChatPage.vue'
 import RegisterPage from './pages/RegisterPage.vue'
+import AccountsPage from './pages/AccountsPage.vue'
 
 const connection = ref<'checking' | 'connected' | 'unavailable'>('checking')
 const signedIn = ref(false)
 const registering = ref(false)
+const accountRevision = ref(0)
 const connectionLabel = computed(() => ({
   checking: '正在连接服务',
   connected: '服务已连接',
@@ -53,13 +55,14 @@ onBeforeUnmount(() => controller?.abort())
 
       <LoginPage v-if="!registering" @auth-change="signedIn = $event" @register-requested="registering = true" />
       <RegisterPage v-else @back="registering = false" />
-      <ChatPage v-if="signedIn" />
+      <AccountsPage v-if="signedIn" @changed="accountRevision++" />
+      <ChatPage v-if="signedIn" :key="accountRevision" />
 
       <section class="preparation" aria-labelledby="preparation-title">
         <div class="preparation-copy">
           <span class="section-index">01 / 准备开始</span>
           <h2 id="preparation-title">你的创作空间正在搭建</h2>
-          <p>目前已开放登录与服务连接检查。抖音账号、资料库和内容计划将在后续开发中逐步接入。</p>
+          <p>已开放登录、内部内容账号配置与服务连接检查。资料库和内容计划将在后续开发中逐步接入。</p>
         </div>
         <div class="connection-panel">
           <span class="connection" :class="connection" role="status" aria-live="polite">

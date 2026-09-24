@@ -104,7 +104,7 @@
 | F35 | `deploy/backup.sh`、`deploy/restore.sh` | Linux 数据与文件备份、隔离恢复 |
 | F36 | `docs/deployment.md` | 宝塔盘点、部署步骤、密钥配置、故障和恢复手册 |
 
-F03 中迁移的完整文件名按功能固定为 `V1__users.sql`（W1-D2）、`V2__invitations.sql`（W2-D1）、`V3__accounts_materials.sql`（W2-D2）、`V4__content.sql`（W3-D1）、`V5__plans.sql`（W4-D1）、`V6__tasks.sql`（W5-D1）、`V7__usage.sql`（W5-D4）、`V8__notifications.sql`（W6-D1）、`V9__analytics.sql`（W7-D1）。均放在表中同一个 migration 目录，已执行的迁移不反复修改。
+F03 中已执行的迁移为 `V1__users.sql`（W1-D2）、`V2__invitations.sql`（W2-D1）、`V3__accounts.sql`（W2-D2）。资料表在 W2-D3 单独追加迁移，避免提前冻结尚未实现的资料结构；后续内容、计划、任务、用量、通知和分析依次追加版本，已执行的迁移不反复修改。
 
 ### 测试文件与重点场景
 
@@ -207,7 +207,7 @@ F03 中迁移的完整文件名按功能固定为 `V1__users.sql`（W1-D2）、`
 
   **完成标准：** 有效邀请可注册；同一码最多成功一次；密码经标准密码编码器处理。
 
-- [ ] **W2-D2｜周二｜1.5 小时｜多账号配置**
+- [x] **W2-D2｜周二｜1.5 小时｜多账号配置**
 
   **动作：** 增加内部账号的创建、查询、编辑接口及页面；配置定位、栏目、受众、每周频次；创建首个 Java + 托福账号和一个测试账号。
 
