@@ -64,7 +64,7 @@ onBeforeUnmount(() => controller?.abort())
         <div class="preparation-copy">
           <span class="section-index">01 / 准备开始</span>
           <h2 id="preparation-title">你的创作空间正在搭建</h2>
-          <p>已开放登录、内部内容账号配置、文字资料导入与服务连接检查。内容计划将在后续开发中逐步接入。</p>
+          <p>已开放登录、内容账号配置、资料导入与基于个人资料的问答。内容计划将在后续开发中逐步接入。</p>
         </div>
         <div class="connection-panel">
           <span class="connection" :class="connection" role="status" aria-live="polite">

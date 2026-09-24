@@ -95,13 +95,13 @@ powershell -NoProfile -ExecutionPolicy RemoteSigned -File scripts/verify-model.p
 
 接口为 `GET /api/materials`、`GET /api/materials/{id}`、`POST /api/materials`（JSON，`kind=TEXT/LINK`）、`POST /api/materials/pdf`（multipart）、`DELETE /api/materials/{id}`。创建和删除需要 CSRF token。所有操作从登录态取得 ownerId；访问或删除他人资料统一返回 404，关联他人账号同样返回 404。删除资料时数据库同步删除其检索片段及账号关联。
 
-`GET /api/materials/search?accountId=...&q=...` 按登录用户与所选账号检索标题、文字片段，最多返回 10 份资料及片段、来源链接或文件名。未关联账号的旧资料视为当前用户的通用资料；关联了账号的资料只出现在对应账号的结果里。无命中返回 `status=INSUFFICIENT_MATERIAL` 与空列表，不伪造出处。关键词检索不保证语义匹配；只读 `search_my_materials` Tool 已封装归属范围，接入 Agent 工作流在下一开发任务完成。
+`GET /api/materials/search?accountId=...&q=...` 按登录用户与所选账号检索标题、文字片段，最多返回 10 份资料及片段、来源链接或文件名。未关联账号的旧资料视为当前用户的通用资料；关联了账号的资料只出现在对应账号的结果里。无命中返回 `status=INSUFFICIENT_MATERIAL` 与空列表，不伪造出处。关键词检索不保证语义匹配；只读 `search_my_materials` Tool 已接入 `ResearchWorkflow` 的本地检索节点。
 
 `ContentWorkflow` 用 LangGraph4j 串联读取账号配置和生成摘要两个节点。工具调用最多 3 轮，超出按 `AGENT_TOOL_LIMIT` 结束；图另有步数上限作为第二道保护，因此不会无限调用。工具执行在日志中记录工具名、状态和耗时。
 
 ## 对话与 MCP 搜索
 
-登录后，工作台会读取当前用户自己的账号，并可请求一条账号创作摘要。后端会在运行工作流前检查账号归属；未配置模型时页面显示“模型尚未配置”，不会生成固定示例内容。
+登录后，工作台会读取当前用户自己的账号，并可请求一条账号创作摘要。`POST /api/agent/research` 按所选账号先检索个人资料；有命中时只把最多 3 个片段作为不可信数据交给模型，回答和实际片段出处一同返回。资料不足时不调用模型，也不编造答案；网页搜索补充仍待接入 MCP 执行能力。后端会在运行工作流前检查账号归属；未配置模型时页面显示“模型尚未配置”，不会生成固定示例内容。
 
 MCP 采用 LangChain4j 的 Streamable HTTP Client。`GET /api/agent/mcp/tools` 只发现由 `MCP_SEARCH_ALLOWED_TOOLS` 显式允许的工具；用户请求不能指定 MCP 地址、认证头或工具名，因此第三方服务不会自动取得账号资料、会话或资料库内容。将 `MCP_SEARCH_URL`、`MCP_SEARCH_BEARER_TOKEN` 和已审查的工具名写入本机 `.env` 后，才会尝试连接。空配置返回 `MCP_NOT_CONFIGURED`，连接或协议失败返回 `MCP_UNAVAILABLE`。
 

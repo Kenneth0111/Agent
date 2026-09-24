@@ -1,6 +1,7 @@
 package com.example.creator.agent;
 
 import com.example.creator.auth.CurrentUser;
+import com.example.creator.material.MaterialSearchService;
 import java.util.List;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -18,13 +19,15 @@ public class AgentController {
     private final AccountProfiles accounts;
     private final ContentWorkflow workflow;
     private final McpSearchGateway mcpSearch;
+    private final ResearchWorkflow research;
 
     AgentController(CurrentUser currentUser, AccountProfiles accounts, ContentWorkflow workflow,
-                    McpSearchGateway mcpSearch) {
+                    McpSearchGateway mcpSearch, ResearchWorkflow research) {
         this.currentUser = currentUser;
         this.accounts = accounts;
         this.workflow = workflow;
         this.mcpSearch = mcpSearch;
+        this.research = research;
     }
 
     @GetMapping("/accounts")
@@ -63,6 +66,25 @@ public class AgentController {
         }
     }
 
+    @PostMapping("/research")
+    public ResponseEntity<?> research(@RequestBody(required = false) ResearchRequest request) {
+        if (request == null || request.accountId() == null || request.accountId().isBlank())
+            return error(HttpStatus.BAD_REQUEST, "INVALID_ACCOUNT_ID");
+        if (request.query() == null || request.query().isBlank() || request.query().strip().length() > 100)
+            return error(HttpStatus.BAD_REQUEST, "INVALID_QUERY");
+        if (accounts.find(currentUser.id(), request.accountId().strip()).isEmpty())
+            return error(HttpStatus.NOT_FOUND, "ACCOUNT_NOT_FOUND");
+        try {
+            return ResponseEntity.ok(research.research(currentUser.id(), request.accountId().strip(),
+                    request.query().strip()));
+        } catch (MaterialSearchService.SearchFailure failure) {
+            return error("ACCOUNT_NOT_FOUND".equals(failure.getMessage()) ? HttpStatus.NOT_FOUND : HttpStatus.BAD_REQUEST,
+                    failure.getMessage());
+        } catch (ModelGateway.ModelFailure failure) {
+            return error(statusFor(failure.getMessage()), failure.getMessage());
+        }
+    }
+
     private static HttpStatus statusFor(String code) {
         return switch (code) {
             case "MODEL_NOT_CONFIGURED", "MODEL_UPSTREAM_FAILED" -> HttpStatus.SERVICE_UNAVAILABLE;
@@ -78,6 +100,7 @@ public class AgentController {
     }
 
     public record SummaryRequest(String accountId) { }
+    public record ResearchRequest(String accountId, String query) { }
     public record AccountView(String id, String name, String audience, String positioning,
                               List<String> columns, int weeklyTarget) { }
     public record SummaryView(String accountId, String summary) { }

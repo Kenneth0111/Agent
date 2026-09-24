@@ -1,4 +1,5 @@
 # Local credentials and generated files
+DeepseekAPIkey.md
 .env
 .env.*
 !.env.example

@@ -18,7 +18,8 @@ class AgentControllerTest {
     private final AccountProfiles accounts = mock(AccountProfiles.class);
     private final ContentWorkflow workflow = mock(ContentWorkflow.class);
     private final McpSearchGateway mcpSearch = mock(McpSearchGateway.class);
-    private final AgentController controller = new AgentController(currentUser, accounts, workflow, mcpSearch);
+    private final ResearchWorkflow research = mock(ResearchWorkflow.class);
+    private final AgentController controller = new AgentController(currentUser, accounts, workflow, mcpSearch, research);
     private final AccountProfile owned = new AccountProfile("owned", 7L, "Java 面试快问快答",
             "面向初中级 Java 开发者", List.of("并发"), 2);
 
@@ -70,5 +71,15 @@ class AgentControllerTest {
         var response = controller.mcpTools();
         assertThat(response.getStatusCode()).isEqualTo(org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE);
         assertThat(response.getBody()).isEqualTo(new AgentController.ErrorView("MCP_NOT_CONFIGURED"));
+    }
+
+    @Test
+    void researchRejectsInvalidInputAndForeignAccounts() {
+        assertThat(controller.research(new AgentController.ResearchRequest("owned", " ")).getStatusCode())
+                .isEqualTo(org.springframework.http.HttpStatus.BAD_REQUEST);
+        assertThat(controller.research(new AgentController.ResearchRequest("foreign", "volatile")).getStatusCode())
+                .isEqualTo(org.springframework.http.HttpStatus.NOT_FOUND);
+        verify(research, never()).research(7L, "owned", " ");
+        verify(research, never()).research(7L, "foreign", "volatile");
     }
 }

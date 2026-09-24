@@ -50,10 +50,10 @@ public class MaterialSearchService {
                 row.getString("source_url"), row.getString("file_name"), row.getString("kind"));
     }
 
-    public record SearchResponse(String status, List<SearchResult> results) { }
+    public record SearchResponse(String status, List<SearchResult> results) implements java.io.Serializable { }
     public record SearchResult(String materialId, String title, String snippet,
-                               String sourceUrl, String fileName, String kind) { }
+                               String sourceUrl, String fileName, String kind) implements java.io.Serializable { }
     public static final class SearchFailure extends RuntimeException {
-        SearchFailure(String code) { super(code); }
+        public SearchFailure(String code) { super(code); }
     }
 }

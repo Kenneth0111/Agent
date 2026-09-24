@@ -139,6 +139,8 @@ class MaterialIsolationTest extends IntegrationTestSupport {
         assertThat(search(owner, foreignAccount, "unique-foreign-secret").statusCode()).isEqualTo(404);
         assertThat(search(stranger, foreignAccount, "volatile").body()).contains("INSUFFICIENT_MATERIAL");
         assertThat(search(owner, javaAccount, " ").statusCode()).isEqualTo(400);
+        assertThat(research(owner, javaAccount, "没有资料的问题").body()).contains("INSUFFICIENT_MATERIAL");
+        assertThat(research(owner, foreignAccount, "volatile").statusCode()).isEqualTo(404);
 
         var tool = new MaterialTools(materialSearch, json, json.readTree(get(owner, "/api/auth/me").body())
                 .get("id").asLong(), javaAccount);
@@ -160,6 +162,16 @@ class MaterialIsolationTest extends IntegrationTestSupport {
     private HttpResponse<String> search(HttpClient client, String accountId, String term) throws Exception {
         return get(client, "/api/materials/search?accountId=" + accountId + "&q="
                 + URLEncoder.encode(term, StandardCharsets.UTF_8));
+    }
+
+    private HttpResponse<String> research(HttpClient client, String accountId, String query) throws Exception {
+        var token = csrf(client);
+        var body = json.createObjectNode().put("accountId", accountId).put("query", query);
+        return client.send(HttpRequest.newBuilder(uri("/api/agent/research"))
+                .header("Content-Type", "application/json")
+                .header(token.get("headerName").asText(), token.get("token").asText())
+                .POST(HttpRequest.BodyPublishers.ofString(body.toString())).build(),
+                HttpResponse.BodyHandlers.ofString());
     }
 
     private byte[] pdfBytes(boolean withText) throws Exception {

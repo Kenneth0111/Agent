@@ -36,4 +36,39 @@ describe('creator chat', () => {
     expect(wrapper.find('[role="status"]').exists()).toBe(false)
     wrapper.unmount()
   })
+
+  it('asks within the selected account and displays local evidence with its source', async () => {
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(Response.json([{ id: 'java', name: 'Java 账号', positioning: '面试', columns: [], weeklyTarget: 2 }]))
+      .mockResolvedValueOnce(Response.json({ headerName: 'X-CSRF-TOKEN', token: 'csrf' }))
+      .mockResolvedValueOnce(Response.json({ status: 'MATCHED', answer: 'volatile 保证可见性 [1]', sources: [
+        { materialId: 'm1', title: '并发笔记', snippet: 'volatile 保证可见性',
+          sourceUrl: 'https://example.test/notes', fileName: null, kind: 'TEXT' },
+      ] }))
+    vi.stubGlobal('fetch', fetch)
+    const wrapper = mount(ChatPage)
+    await flushPromises()
+    await wrapper.get('#agent-query').setValue('volatile 为什么能保证可见性？')
+    await wrapper.findAll('button')[1].trigger('click')
+    await flushPromises()
+    expect(JSON.parse(fetch.mock.calls[2][1].body)).toEqual({ accountId: 'java', query: 'volatile 为什么能保证可见性？' })
+    expect(wrapper.get('.research-answer').text()).toContain('volatile 保证可见性')
+    expect(wrapper.get('.source-list a').attributes('href')).toBe('https://example.test/notes')
+    wrapper.unmount()
+  })
+
+  it('shows insufficient material without a fabricated answer', async () => {
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(Response.json([{ id: 'java', name: 'Java 账号', positioning: '面试', columns: [], weeklyTarget: 2 }]))
+      .mockResolvedValueOnce(Response.json({ headerName: 'X-CSRF-TOKEN', token: 'csrf' }))
+      .mockResolvedValueOnce(Response.json({ status: 'INSUFFICIENT_MATERIAL', answer: null, sources: [] })))
+    const wrapper = mount(ChatPage)
+    await flushPromises()
+    await wrapper.get('#agent-query').setValue('没有资料的问题')
+    await wrapper.findAll('button')[1].trigger('click')
+    await flushPromises()
+    expect(wrapper.get('.research-answer').text()).toContain('资料不足')
+    expect(wrapper.find('.source-list').exists()).toBe(false)
+    wrapper.unmount()
+  })
 })
