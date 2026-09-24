@@ -12,6 +12,10 @@ spring:
     open-in-view: false
     hibernate:
       ddl-auto: validate
+  session:
+    timeout: 30m
+    redis:
+      namespace: creator:sessions
   data:
     redis:
       host: ${REDIS_HOST:127.0.0.1}
@@ -21,6 +25,13 @@ spring:
 server:
   address: ${SERVER_ADDRESS:127.0.0.1}
   port: ${SERVER_PORT:18080}
+  servlet:
+    session:
+      cookie:
+        name: CREATOR_SESSION
+        http-only: true
+        same-site: lax
+        secure: ${SESSION_COOKIE_SECURE:false}
 
 management:
   endpoints:

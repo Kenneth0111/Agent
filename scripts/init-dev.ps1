@@ -13,6 +13,8 @@ function New-LocalSecret {
 $settings = @(
     'SERVER_ADDRESS=127.0.0.1'
     'SERVER_PORT=18080'
+    'SPRING_PROFILES_ACTIVE=dev'
+    ('DEV_USER_PASSWORD=' + (New-LocalSecret))
     ('MYSQL_ROOT_PASSWORD=' + (New-LocalSecret))
     ('DB_PASSWORD=' + (New-LocalSecret))
     ('REDIS_PASSWORD=' + (New-LocalSecret))

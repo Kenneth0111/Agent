@@ -26,6 +26,6 @@ class HealthEndpointTest extends IntegrationTestSupport {
 
     @Test
     void environmentIsNotExposedThroughManagementApi() throws Exception {
-        mvc.perform(get("/api/env")).andExpect(status().isNotFound());
+        mvc.perform(get("/api/env")).andExpect(status().isUnauthorized());
     }
 }

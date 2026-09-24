@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import LoginPage from './pages/LoginPage.vue'
 
 const connection = ref<'checking' | 'connected' | 'unavailable'>('checking')
 const connectionLabel = computed(() => ({
@@ -46,11 +47,13 @@ onBeforeUnmount(() => controller?.abort())
         <p class="intro-copy">从一个值得分享的问题开始。整理资料，写下表达，<br class="desktop-break" />让每一次准备，都成为下一次创作的起点。</p>
       </section>
 
+      <LoginPage />
+
       <section class="preparation" aria-labelledby="preparation-title">
         <div class="preparation-copy">
           <span class="section-index">01 / 准备开始</span>
           <h2 id="preparation-title">你的创作空间正在搭建</h2>
-          <p>目前已开放工作台首页。账号、资料库和内容计划将在后续开发中逐步接入。</p>
+          <p>目前已开放登录与服务连接检查。抖音账号、资料库和内容计划将在后续开发中逐步接入。</p>
         </div>
         <div class="connection-panel">
           <span class="connection" :class="connection" role="status" aria-live="polite">

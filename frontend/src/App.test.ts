@@ -2,6 +2,8 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import App from './App.vue'
 
+vi.mock('./pages/LoginPage.vue', () => ({ default: { template: '<div />' } }))
+
 afterEach(() => vi.unstubAllGlobals())
 
 describe('service connection', () => {
