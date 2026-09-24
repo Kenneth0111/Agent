@@ -46,6 +46,15 @@ export async function putJsonWithCsrf(path: string, body: unknown): Promise<unkn
   return jsonWithCsrf('PUT', path, body)
 }
 
+export async function deleteWithCsrf(path: string): Promise<void> {
+  const csrf = await request('/api/auth/csrf')
+  if (typeof csrf !== 'object' || csrf === null || !('headerName' in csrf) || !('token' in csrf)
+      || typeof csrf.headerName !== 'string' || typeof csrf.token !== 'string') {
+    throw new Error('Invalid CSRF response')
+  }
+  await request(path, { method: 'DELETE', headers: { [csrf.headerName]: csrf.token } })
+}
+
 async function jsonWithCsrf(method: 'POST' | 'PUT', path: string, body: unknown): Promise<unknown> {
   const csrf = await request('/api/auth/csrf')
   if (typeof csrf !== 'object' || csrf === null || !('headerName' in csrf) || !('token' in csrf)
