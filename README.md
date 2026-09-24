@@ -2,7 +2,7 @@
 
 一个逐步开发中的 Java 内容创作与运营 Agent。目标是支持资料检索、选题、脚本、周排期及基于真实数据的复盘。
 
-当前已支持登录、退出、当前用户身份和服务连接检查，并接入 MySQL、Redis/Redisson。抖音接入和 AI 生成功能仍在后续计划中。
+当前已支持登录、退出、当前用户身份和服务连接检查，并接入 MySQL、Redis/Redisson。模型网关已按 DeepSeek 的 OpenAI 兼容接口实现，但本机尚无可用凭据，真实调用未验收。抖音接入和 AI 生成功能仍在后续计划中。
 
 ## 本地环境
 
@@ -66,6 +66,12 @@ npm --prefix frontend run build
 后端测试需要运行中的 Docker：Testcontainers 自动建立并回收独立的 MySQL/Redis 临时容器，不读取开发 `.env`，也不连接开发或生产数据库。首次运行需下载镜像。测试验证健康接口、用户表读写与邮箱唯一性、Redisson 读写和 TTL，以及真实 HTTP 双用户登录隔离、错误密码、CSRF、Cookie 属性、会话轮换和退出后 Cookie 重放失败。
 
 前端测试覆盖后端正常、网络失败及重试、HTTP 错误、异常 JSON 和代理返回 HTML 的状态处理，以及登录、退出、CSRF 更新和登录失败提示。
+
+## 模型网关
+
+`DEEPSEEK_API_KEY` 为空时后端仍能启动，网关对每次调用返回 `MODEL_NOT_CONFIGURED`，不会静默降级成假回复。失败按 `MODEL_AUTH_FAILED`、`MODEL_TIMEOUT`、`MODEL_UPSTREAM_FAILED`、`MODEL_INVALID_OUTPUT` 区分；供应商原始错误正文不进入接口响应和日志。付费调用不自动重试，是否重试由任务状态决定。JSON 结果缺字段或不是 JSON 都判为失败，不保存为内容。
+
+模型测试使用本机临时 HTTP 服务模拟 OpenAI 兼容响应，不发生真实付费调用；真实 DeepSeek 调用需要凭据，尚未验收。
 
 接入实现参考：[Spring Security 会话管理](https://docs.spring.io/spring-security/reference/6.5/servlet/authentication/session-management.html)、[CSRF](https://docs.spring.io/spring-security/reference/6.5/servlet/exploits/csrf.html)、[Redisson 配置](https://redisson.pro/docs/configuration/)、[Testcontainers MySQL](https://java.testcontainers.org/modules/databases/mysql/)。
 
