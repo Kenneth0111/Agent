@@ -93,7 +93,9 @@ powershell -NoProfile -ExecutionPolicy RemoteSigned -File scripts/verify-model.p
 
 登录后可直接粘贴文字、选择 TXT/Markdown 文件、上传可提取文字的 PDF，或保存链接及用户填写的摘录。文字正文最多 100 KiB，PDF 文件最多 5 MiB；扫描件不做 OCR，无法提取文字时明确拒绝。链接只保存为出处，不自动抓取网页。每份资料可关联当前用户的多个内容账号，后端验证账号归属。原文及最多 1000 个 Unicode 字符一段的检索片段保存在 MySQL；资料列表不传输全文，点击预览时才读取原文。
 
-接口为 `GET /api/materials`、`GET /api/materials/{id}`、`POST /api/materials`（JSON，`kind=TEXT/LINK`）、`POST /api/materials/pdf`（multipart）、`DELETE /api/materials/{id}`。创建和删除需要 CSRF token。所有操作从登录态取得 ownerId；访问或删除他人资料统一返回 404，关联他人账号同样返回 404。删除资料时数据库同步删除其检索片段及账号关联。检索排序和 Agent 引用将在后续资料检索任务接入。
+接口为 `GET /api/materials`、`GET /api/materials/{id}`、`POST /api/materials`（JSON，`kind=TEXT/LINK`）、`POST /api/materials/pdf`（multipart）、`DELETE /api/materials/{id}`。创建和删除需要 CSRF token。所有操作从登录态取得 ownerId；访问或删除他人资料统一返回 404，关联他人账号同样返回 404。删除资料时数据库同步删除其检索片段及账号关联。
+
+`GET /api/materials/search?accountId=...&q=...` 按登录用户与所选账号检索标题、文字片段，最多返回 10 份资料及片段、来源链接或文件名。未关联账号的旧资料视为当前用户的通用资料；关联了账号的资料只出现在对应账号的结果里。无命中返回 `status=INSUFFICIENT_MATERIAL` 与空列表，不伪造出处。关键词检索不保证语义匹配；只读 `search_my_materials` Tool 已封装归属范围，接入 Agent 工作流在下一开发任务完成。
 
 `ContentWorkflow` 用 LangGraph4j 串联读取账号配置和生成摘要两个节点。工具调用最多 3 轮，超出按 `AGENT_TOOL_LIMIT` 结束；图另有步数上限作为第二道保护，因此不会无限调用。工具执行在日志中记录工具名、状态和耗时。
 

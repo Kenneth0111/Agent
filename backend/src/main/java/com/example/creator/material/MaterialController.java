@@ -22,15 +22,28 @@ import org.springframework.web.bind.annotation.RestController;
 public class MaterialController {
     private final CurrentUser currentUser;
     private final MaterialService materials;
+    private final MaterialSearchService search;
 
-    MaterialController(CurrentUser currentUser, MaterialService materials) {
+    MaterialController(CurrentUser currentUser, MaterialService materials, MaterialSearchService search) {
         this.currentUser = currentUser;
         this.materials = materials;
+        this.search = search;
     }
 
     @GetMapping
     public List<MaterialService.MaterialSummary> list() {
         return materials.ownedBy(currentUser.id());
+    }
+
+    @GetMapping("/search")
+    public ResponseEntity<?> search(@RequestParam(required = false) String accountId,
+                                    @RequestParam(required = false) String q) {
+        try {
+            return ResponseEntity.ok(search.search(currentUser.id(), accountId, q));
+        } catch (MaterialSearchService.SearchFailure failure) {
+            return ResponseEntity.status("ACCOUNT_NOT_FOUND".equals(failure.getMessage()) ? 404 : 400)
+                    .body(new ErrorView(failure.getMessage()));
+        }
     }
 
     @GetMapping("/{id}")

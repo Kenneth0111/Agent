@@ -2,6 +2,8 @@ package com.example.creator;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.example.creator.agent.MaterialTools;
+import com.example.creator.material.MaterialSearchService;
 import java.net.CookieManager;
 import java.net.CookiePolicy;
 import java.net.URI;
@@ -32,6 +34,7 @@ class MaterialIsolationTest extends IntegrationTestSupport {
     @LocalServerPort private int port;
     @Autowired private ObjectMapper json;
     @Autowired private JdbcTemplate jdbc;
+    @Autowired private MaterialSearchService materialSearch;
 
     @Test
     void importedChineseTextCanBePreviewedAndDeletedOnlyByItsOwner() throws Exception {
@@ -103,6 +106,60 @@ class MaterialIsolationTest extends IntegrationTestSupport {
         var pdfId = json.readTree(pdf.body()).get("id").asText();
         assertThat(get(stranger, "/api/materials/" + pdfId).statusCode()).isEqualTo(404);
         assertThat(postPdf(owner, pdfBytes(false), ownAccount).body()).contains("PDF_TEXT_UNAVAILABLE");
+    }
+
+    @Test
+    void tenKeywordChecksRespectOwnerAccountAndDeletion() throws Exception {
+        var owner = client();
+        var stranger = client();
+        login(owner, "creator-a@example.test");
+        login(stranger, "creator-b@example.test");
+        var javaAccount = createAccount(owner);
+        var englishAccount = createAccount(owner);
+        var foreignAccount = createAccount(stranger);
+
+        var javaId = createSearchMaterial(owner, "Java 并发", "volatile happens-before", javaAccount);
+        createSearchMaterial(owner, "TOEFL 跟读", "shadowing pronunciation", englishAccount);
+        createSearchMaterial(owner, "数据库笔记", "MySQL index B-tree", null);
+        createSearchMaterial(stranger, "他人资料", "unique-foreign-secret", foreignAccount);
+
+        for (var term : new String[] {"volatile", "happens", "Java", "MySQL", "index", "B-tree"}) {
+            var result = json.readTree(search(owner, javaAccount, term).body());
+            assertThat(result.get("status").asText()).as(term).isEqualTo("MATCHED");
+            assertThat(result.get("results").size()).as(term).isGreaterThan(0);
+            assertThat(result.get("results").get(0).hasNonNull("snippet")).isTrue();
+            assertThat(result.get("results").get(0).hasNonNull("sourceUrl")).isTrue();
+        }
+        for (var term : new String[] {"TOEFL", "shadowing", "unique-foreign-secret", "%"}) {
+            var result = json.readTree(search(owner, javaAccount, term).body());
+            assertThat(result.get("status").asText()).as(term).isEqualTo("INSUFFICIENT_MATERIAL");
+            assertThat(result.get("results")).isEmpty();
+        }
+        assertThat(search(owner, englishAccount, "shadowing").body()).contains("TOEFL", "shadowing");
+        assertThat(search(owner, foreignAccount, "unique-foreign-secret").statusCode()).isEqualTo(404);
+        assertThat(search(stranger, foreignAccount, "volatile").body()).contains("INSUFFICIENT_MATERIAL");
+        assertThat(search(owner, javaAccount, " ").statusCode()).isEqualTo(400);
+
+        var tool = new MaterialTools(materialSearch, json, json.readTree(get(owner, "/api/auth/me").body())
+                .get("id").asLong(), javaAccount);
+        assertThat(tool.execute("{\"query\":\"volatile\"}")).contains(javaId, "volatile");
+        assertThat(tool.execute("{\"query\":\"shadowing\"}")).contains("INSUFFICIENT_MATERIAL");
+        assertThat(delete(owner, javaId).statusCode()).isEqualTo(204);
+        assertThat(search(owner, javaAccount, "volatile").body()).contains("INSUFFICIENT_MATERIAL");
+    }
+
+    private String createSearchMaterial(HttpClient client, String title, String content, String accountId) throws Exception {
+        var body = json.createObjectNode().put("title", title).put("purpose", "搜索验证")
+                .put("sourceUrl", "https://example.test/reference").put("content", content);
+        if (accountId != null) body.putArray("accountIds").add(accountId);
+        var response = post(client, body.toString());
+        assertThat(response.statusCode()).isEqualTo(201);
+        return json.readTree(response.body()).get("id").asText();
+    }
+
+    private HttpResponse<String> search(HttpClient client, String accountId, String term) throws Exception {
+        return get(client, "/api/materials/search?accountId=" + accountId + "&q="
+                + URLEncoder.encode(term, StandardCharsets.UTF_8));
     }
 
     private byte[] pdfBytes(boolean withText) throws Exception {
