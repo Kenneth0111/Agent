@@ -1,6 +1,10 @@
 spring:
   application:
     name: creator-agent
+  servlet:
+    multipart:
+      max-file-size: 5MB
+      max-request-size: 6MB
   datasource:
     url: ${DB_URL:jdbc:mysql://127.0.0.1:13306/creator_agent?connectionTimeZone=UTC}
     username: ${DB_USER:creator}

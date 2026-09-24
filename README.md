@@ -89,11 +89,11 @@ powershell -NoProfile -ExecutionPolicy RemoteSigned -File scripts/verify-model.p
 
 账号配置保存在 MySQL 的 `content_accounts` 表。登录用户可从页面创建、查看和编辑多个内部内容账号，字段包括名称、目标受众、定位、栏目和每周条数。建档不要求先注册或授权抖音账号。`GET /api/accounts`、`GET /api/accounts/{id}`、`POST /api/accounts` 和 `PUT /api/accounts/{id}` 均从登录态取得 ownerId；其他用户的账号详情和修改统一返回 404。开发环境仅在示例用户还没有账号时创建 Java 八股与托福跟读账号及独立测试号，正式环境没有示例账号。Agent 的只读账号工具使用同一数据库目录。
 
-## 文字资料
+## 资料导入
 
-登录后可直接粘贴文字，或选择 TXT、Markdown 文件。浏览器先读取文件文字，后端再次检查文件名、空内容和 UTF-8 字节大小；单份资料最多 100 KiB。导入时填写标题、用途和可选来源链接，来源链接只保存为出处，不自动抓取网页。原文及最多 1000 个 Unicode 字符一段的检索片段保存在 MySQL；资料列表不传输全文，点击预览时才读取原文。
+登录后可直接粘贴文字、选择 TXT/Markdown 文件、上传可提取文字的 PDF，或保存链接及用户填写的摘录。文字正文最多 100 KiB，PDF 文件最多 5 MiB；扫描件不做 OCR，无法提取文字时明确拒绝。链接只保存为出处，不自动抓取网页。每份资料可关联当前用户的多个内容账号，后端验证账号归属。原文及最多 1000 个 Unicode 字符一段的检索片段保存在 MySQL；资料列表不传输全文，点击预览时才读取原文。
 
-接口为 `GET /api/materials`、`GET /api/materials/{id}`、`POST /api/materials`、`DELETE /api/materials/{id}`。创建和删除需要 CSRF token。所有操作从登录态取得 ownerId；访问或删除他人资料统一返回 404。删除资料时数据库同步删除其检索片段。检索排序和 Agent 引用将在后续资料检索任务接入。
+接口为 `GET /api/materials`、`GET /api/materials/{id}`、`POST /api/materials`（JSON，`kind=TEXT/LINK`）、`POST /api/materials/pdf`（multipart）、`DELETE /api/materials/{id}`。创建和删除需要 CSRF token。所有操作从登录态取得 ownerId；访问或删除他人资料统一返回 404，关联他人账号同样返回 404。删除资料时数据库同步删除其检索片段及账号关联。检索排序和 Agent 引用将在后续资料检索任务接入。
 
 `ContentWorkflow` 用 LangGraph4j 串联读取账号配置和生成摘要两个节点。工具调用最多 3 轮，超出按 `AGENT_TOOL_LIMIT` 结束；图另有步数上限作为第二道保护，因此不会无限调用。工具执行在日志中记录工具名、状态和耗时。
 

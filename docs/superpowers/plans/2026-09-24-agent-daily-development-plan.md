@@ -104,7 +104,7 @@
 | F35 | `deploy/backup.sh`、`deploy/restore.sh` | Linux 数据与文件备份、隔离恢复 |
 | F36 | `docs/deployment.md` | 宝塔盘点、部署步骤、密钥配置、故障和恢复手册 |
 
-F03 中已执行的迁移为 `V1__users.sql`（W1-D2）、`V2__invitations.sql`（W2-D1）、`V3__accounts.sql`（W2-D2）、`V3_1__materials.sql`（W2-D3）。后续内容、计划、任务、用量、通知和分析依次追加版本，已执行的迁移不反复修改。
+F03 中已执行的迁移为 `V1__users.sql`（W1-D2）、`V2__invitations.sql`（W2-D1）、`V3__accounts.sql`（W2-D2）、`V3_1__materials.sql`（W2-D3）、`V3_2__material_accounts.sql`（W2-D4）。后续内容、计划、任务、用量、通知和分析依次追加版本，已执行的迁移不反复修改。
 
 ### 测试文件与重点场景
 
@@ -223,7 +223,7 @@ F03 中已执行的迁移为 `V1__users.sql`（W1-D2）、`V2__invitations.sql`�
 
   **完成标准：** 用户可导入、预览、删除自己的资料；导入的中文内容正常；超限或空文件有明确提示。
 
-- [ ] **W2-D4｜周四｜1.5 小时｜文本 PDF 与链接资料**
+- [x] **W2-D4｜周四｜1.5 小时｜文本 PDF 与链接资料**
 
   **动作：** 支持能提取文字的 PDF；链接先保存 URL、标题和用户提供的摘录，不自动抓取任意网页；扫描 PDF 给出暂不支持的提示；关联资料到当前用户的一个或多个账号。
 

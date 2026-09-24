@@ -1,5 +1,6 @@
 package com.example.creator.material;
 
+import com.example.creator.agent.AccountProfiles;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.sql.ResultSet;
@@ -17,15 +18,19 @@ import org.springframework.transaction.annotation.Transactional;
 public class MaterialService {
     private final JdbcTemplate jdbc;
     private final TextExtractor extractor;
+    private final PdfTextExtractor pdfExtractor;
+    private final AccountProfiles accounts;
 
-    MaterialService(JdbcTemplate jdbc, TextExtractor extractor) {
+    MaterialService(JdbcTemplate jdbc, TextExtractor extractor, PdfTextExtractor pdfExtractor, AccountProfiles accounts) {
         this.jdbc = jdbc;
         this.extractor = extractor;
+        this.pdfExtractor = pdfExtractor;
+        this.accounts = accounts;
     }
 
     public List<MaterialSummary> ownedBy(long ownerId) {
         return jdbc.query("""
-                SELECT id, title, purpose, source_url, file_name, segment_count
+                SELECT id, title, purpose, source_url, file_name, segment_count, kind
                 FROM materials WHERE owner_id = ? ORDER BY created_at DESC, id DESC
                 """, this::summary, ownerId);
     }
@@ -33,7 +38,7 @@ public class MaterialService {
     public Optional<MaterialDetail> find(long ownerId, String id) {
         try {
             return Optional.ofNullable(jdbc.queryForObject("""
-                    SELECT id, title, purpose, source_url, file_name, segment_count, content
+                    SELECT id, title, purpose, source_url, file_name, segment_count, content, kind
                     FROM materials WHERE owner_id = ? AND id = ?
                     """, this::detail, ownerId, id));
         } catch (EmptyResultDataAccessException missing) {
@@ -44,20 +49,47 @@ public class MaterialService {
     @Transactional
     public MaterialDetail create(long ownerId, MaterialInput input) {
         if (input == null) throw new TextExtractor.MaterialInvalid("INVALID_MATERIAL");
+        var kind = input.kind() == null ? "TEXT" : input.kind();
+        if (!List.of("TEXT", "LINK").contains(kind)) throw new TextExtractor.MaterialInvalid("INVALID_MATERIAL");
+        return save(ownerId, input, kind);
+    }
+
+    @Transactional
+    public MaterialDetail createPdf(long ownerId, MaterialInput input, org.springframework.web.multipart.MultipartFile file) {
+        if (input == null) throw new TextExtractor.MaterialInvalid("INVALID_MATERIAL");
+        var content = pdfExtractor.extract(file);
+        var fileName = file.getOriginalFilename();
+        if (fileName.length() > 255 || fileName.contains("/") || fileName.contains("\\"))
+            throw new TextExtractor.MaterialInvalid("INVALID_PDF");
+        return save(ownerId, new MaterialInput(input.title(), input.purpose(), input.sourceUrl(),
+                fileName, content, "PDF", input.accountIds()), "PDF");
+    }
+
+    private MaterialDetail save(long ownerId, MaterialInput input, String kind) {
         var title = required(input.title(), 200);
         var purpose = required(input.purpose(), 80);
         var sourceUrl = sourceUrl(input.sourceUrl());
-        var fileName = fileName(input.fileName());
+        if ("LINK".equals(kind) && sourceUrl == null) throw new TextExtractor.MaterialInvalid("INVALID_MATERIAL");
+        var fileName = "PDF".equals(kind) ? input.fileName() : fileName(input.fileName());
+        if ("LINK".equals(kind) && fileName != null) throw new TextExtractor.MaterialInvalid("INVALID_MATERIAL");
+        var accountIds = input.accountIds() == null ? List.<String>of() : input.accountIds().stream().distinct().toList();
+        for (var accountId : accountIds) {
+            if (accountId == null || accounts.find(ownerId, accountId).isEmpty())
+                throw new TextExtractor.MaterialInvalid("ACCOUNT_NOT_FOUND");
+        }
         var extracted = extractor.extract(input.content());
         var id = UUID.randomUUID().toString();
         jdbc.update("""
-                INSERT INTO materials (id, owner_id, title, purpose, source_url, file_name, content, segment_count)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO materials (id, owner_id, title, purpose, source_url, file_name, content, segment_count, kind)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, id, ownerId, title, purpose, sourceUrl, fileName,
-                extracted.content(), extracted.segments().size());
+                extracted.content(), extracted.segments().size(), kind);
         for (int index = 0; index < extracted.segments().size(); index++) {
             jdbc.update("INSERT INTO material_segments (material_id, segment_index, body) VALUES (?, ?, ?)",
                     id, index, extracted.segments().get(index));
+        }
+        for (var accountId : accountIds) {
+            jdbc.update("INSERT INTO material_accounts (material_id, account_id) VALUES (?, ?)", id, accountId);
         }
         return find(ownerId, id).orElseThrow();
     }
@@ -103,18 +135,26 @@ public class MaterialService {
 
     private MaterialSummary summary(ResultSet row, int index) throws SQLException {
         return new MaterialSummary(row.getString("id"), row.getString("title"), row.getString("purpose"),
-                row.getString("source_url"), row.getString("file_name"), row.getInt("segment_count"));
+                row.getString("source_url"), row.getString("file_name"), row.getInt("segment_count"),
+                row.getString("kind"), accountIds(row.getString("id")));
     }
 
     private MaterialDetail detail(ResultSet row, int index) throws SQLException {
         return new MaterialDetail(row.getString("id"), row.getString("title"), row.getString("purpose"),
                 row.getString("source_url"), row.getString("file_name"), row.getInt("segment_count"),
-                row.getString("content"));
+                row.getString("content"), row.getString("kind"), accountIds(row.getString("id")));
     }
 
-    public record MaterialInput(String title, String purpose, String sourceUrl, String fileName, String content) { }
+    private List<String> accountIds(String materialId) {
+        return jdbc.queryForList("SELECT account_id FROM material_accounts WHERE material_id = ? ORDER BY account_id",
+                String.class, materialId);
+    }
+
+    public record MaterialInput(String title, String purpose, String sourceUrl, String fileName,
+                                String content, String kind, List<String> accountIds) { }
     public record MaterialSummary(String id, String title, String purpose, String sourceUrl,
-                                  String fileName, int segmentCount) { }
+                                  String fileName, int segmentCount, String kind, List<String> accountIds) { }
     public record MaterialDetail(String id, String title, String purpose, String sourceUrl,
-                                 String fileName, int segmentCount, String content) { }
+                                 String fileName, int segmentCount, String content, String kind,
+                                 List<String> accountIds) { }
 }

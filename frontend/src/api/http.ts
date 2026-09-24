@@ -42,6 +42,15 @@ export async function postJsonWithCsrf(path: string, body: unknown): Promise<unk
   return jsonWithCsrf('POST', path, body)
 }
 
+export async function postMultipartWithCsrf(path: string, body: FormData): Promise<unknown> {
+  const csrf = await request('/api/auth/csrf')
+  if (typeof csrf !== 'object' || csrf === null || !('headerName' in csrf) || !('token' in csrf)
+      || typeof csrf.headerName !== 'string' || typeof csrf.token !== 'string') {
+    throw new Error('Invalid CSRF response')
+  }
+  return request(path, { method: 'POST', headers: { [csrf.headerName]: csrf.token }, body })
+}
+
 export async function putJsonWithCsrf(path: string, body: unknown): Promise<unknown> {
   return jsonWithCsrf('PUT', path, body)
 }
