@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import LoginPage from './pages/LoginPage.vue'
+import ChatPage from './pages/ChatPage.vue'
 
 const connection = ref<'checking' | 'connected' | 'unavailable'>('checking')
+const signedIn = ref(false)
 const connectionLabel = computed(() => ({
   checking: '正在连接服务',
   connected: '服务已连接',
@@ -47,7 +49,8 @@ onBeforeUnmount(() => controller?.abort())
         <p class="intro-copy">从一个值得分享的问题开始。整理资料，写下表达，<br class="desktop-break" />让每一次准备，都成为下一次创作的起点。</p>
       </section>
 
-      <LoginPage />
+      <LoginPage @auth-change="signedIn = $event" />
+      <ChatPage v-if="signedIn" />
 
       <section class="preparation" aria-labelledby="preparation-title">
         <div class="preparation-copy">

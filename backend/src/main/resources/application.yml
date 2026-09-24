@@ -39,6 +39,12 @@ creator:
     api-key: ${DEEPSEEK_API_KEY:}
     name: ${DEEPSEEK_MODEL:deepseek-chat}
     timeout: ${DEEPSEEK_TIMEOUT:30s}
+  mcp:
+    search:
+      url: ${MCP_SEARCH_URL:}
+      bearer-token: ${MCP_SEARCH_BEARER_TOKEN:}
+      allowed-tools: ${MCP_SEARCH_ALLOWED_TOOLS:search}
+      timeout: ${MCP_SEARCH_TIMEOUT:10s}
 
 management:
   endpoints:

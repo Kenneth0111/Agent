@@ -3,6 +3,7 @@ import { onMounted, ref } from 'vue'
 import { HttpError, postWithCsrf, request } from '../api/http'
 
 interface User { id: number; email: string; displayName: string }
+const emit = defineEmits<{ authChange: [signedIn: boolean] }>()
 const user = ref<User | null>(null)
 const email = ref('')
 const password = ref('')
@@ -18,8 +19,13 @@ async function loadUser() {
       throw new Error('Invalid user response')
     }
     user.value = { id: result.id, email: result.email, displayName: result.displayName }
+    emit('authChange', true)
   } catch (cause) {
-    if (cause instanceof HttpError && cause.status === 401) { user.value = null; return }
+    if (cause instanceof HttpError && cause.status === 401) {
+      user.value = null
+      emit('authChange', false)
+      return
+    }
     throw cause
   }
 }
@@ -50,7 +56,11 @@ async function login() {
 async function logout() {
   pending.value = true
   error.value = ''
-  try { await postWithCsrf('/api/auth/logout'); user.value = null }
+  try {
+    await postWithCsrf('/api/auth/logout')
+    user.value = null
+    emit('authChange', false)
+  }
   catch { error.value = '退出失败，请稍后重试。' }
   finally { pending.value = false }
 }

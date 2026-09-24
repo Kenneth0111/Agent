@@ -1,5 +1,5 @@
 export class HttpError extends Error {
-  constructor(readonly status: number) { super(`HTTP ${status}`) }
+  constructor(readonly status: number, readonly code?: string) { super(code ?? `HTTP ${status}`) }
 }
 
 export async function request(path: string, options: RequestInit = {}): Promise<unknown> {
@@ -7,8 +7,19 @@ export async function request(path: string, options: RequestInit = {}): Promise<
   const timeout = setTimeout(() => controller.abort(), 10_000)
   try {
     const response = await fetch(path, { ...options, credentials: 'same-origin', signal: controller.signal })
-    if (!response.ok) throw new HttpError(response.status)
-    return response.status === 204 ? null : await response.json()
+    if (response.status === 204) return null
+    if (!response.ok) {
+      try {
+        const body: unknown = await response.json()
+        const code = typeof body === 'object' && body !== null && 'code' in body && typeof body.code === 'string'
+          ? body.code : undefined
+        throw new HttpError(response.status, code)
+      } catch (cause) {
+        if (cause instanceof HttpError) throw cause
+        throw new HttpError(response.status)
+      }
+    }
+    return await response.json()
   } finally {
     clearTimeout(timeout)
   }
@@ -24,5 +35,18 @@ export async function postWithCsrf(path: string, body = ''): Promise<void> {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded', [csrf.headerName]: csrf.token },
     body,
+  })
+}
+
+export async function postJsonWithCsrf(path: string, body: unknown): Promise<unknown> {
+  const csrf = await request('/api/auth/csrf')
+  if (typeof csrf !== 'object' || csrf === null || !('headerName' in csrf) || !('token' in csrf)
+      || typeof csrf.headerName !== 'string' || typeof csrf.token !== 'string') {
+    throw new Error('Invalid CSRF response')
+  }
+  return request(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', [csrf.headerName]: csrf.token },
+    body: JSON.stringify(body),
   })
 }

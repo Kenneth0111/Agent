@@ -89,7 +89,15 @@ powershell -NoProfile -ExecutionPolicy RemoteSigned -File scripts/verify-model.p
 
 `ContentWorkflow` 用 LangGraph4j 串联读取账号配置和生成摘要两个节点。工具调用最多 3 轮，超出按 `AGENT_TOOL_LIMIT` 结束；图另有步数上限作为第二道保护，因此不会无限调用。工具执行在日志中记录工具名、状态和耗时。
 
-接入实现参考：[Spring Security 会话管理](https://docs.spring.io/spring-security/reference/6.5/servlet/authentication/session-management.html)、[CSRF](https://docs.spring.io/spring-security/reference/6.5/servlet/exploits/csrf.html)、[Redisson 配置](https://redisson.pro/docs/configuration/)、[Testcontainers MySQL](https://java.testcontainers.org/modules/databases/mysql/)。
+## 对话与 MCP 搜索
+
+登录后，工作台会读取当前用户自己的账号，并可请求一条账号创作摘要。后端会在运行工作流前检查账号归属；未配置模型时页面显示“模型尚未配置”，不会生成固定示例内容。
+
+MCP 采用 LangChain4j 的 Streamable HTTP Client。`GET /api/agent/mcp/tools` 只发现由 `MCP_SEARCH_ALLOWED_TOOLS` 显式允许的工具；用户请求不能指定 MCP 地址、认证头或工具名，因此第三方服务不会自动取得账号资料、会话或资料库内容。将 `MCP_SEARCH_URL`、`MCP_SEARCH_BEARER_TOKEN` 和已审查的工具名写入本机 `.env` 后，才会尝试连接。空配置返回 `MCP_NOT_CONFIGURED`，连接或协议失败返回 `MCP_UNAVAILABLE`。
+
+目前尚未选定搜索 MCP 服务商，因此没有执行真实网页搜索，也没有把“发现工具”写成“已联网搜索”。确定服务商后，下一步会根据其实际查询工具的参数、返回来源字段和费用策略，接入受限的搜索执行功能。
+
+接入实现参考：[Spring Security 会话管理](https://docs.spring.io/spring-security/reference/6.5/servlet/authentication/session-management.html)、[CSRF](https://docs.spring.io/spring-security/reference/6.5/servlet/exploits/csrf.html)、[Redisson 配置](https://redisson.pro/docs/configuration/)、[Testcontainers MySQL](https://java.testcontainers.org/modules/databases/mysql/)、[LangChain4j MCP](https://docs.langchain4j.dev/tutorials/mcp/)。
 
 ## 进度与提交
 

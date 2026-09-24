@@ -17,9 +17,9 @@ public class ContentWorkflow {
     private static final int MAX_TOOL_ROUNDS = 3;
     private static final int MAX_GRAPH_STEPS = 6;
     private static final String READ_INSTRUCTION = """
-            ???????????? read_account_profile ???????????????????????????
-            ???? ACCOUNT_NOT_FOUND ????????????????? ID?""";
-    private static final String SUMMARY_INSTRUCTION = "?????? 40 ??????????????????";
+            你是内容创作助手。必须先调用 read_account_profile 读取当前账号的配置，
+            再用配置事实回答。若得到 ACCOUNT_NOT_FOUND，不要猜测或尝试其他账号 ID。""";
+    private static final String SUMMARY_INSTRUCTION = "根据下列账号事实，用不超过 40 字总结创作定位和本周重点：";
 
     private final ModelGateway model;
     private final AccountProfiles accounts;
@@ -59,7 +59,7 @@ public class ContentWorkflow {
     private Map<String, Object> readAccount(ContentState state) {
         var tool = new AccountProfileTool(accounts, json, state.userId());
         return Map.of("accountFacts", model.replyUsingTools("readAccount", READ_INSTRUCTION,
-                "?? ID?" + state.accountId(), List.<LocalTool>of(tool), MAX_TOOL_ROUNDS));
+                "请读取账号 ID：" + state.accountId(), List.<LocalTool>of(tool), MAX_TOOL_ROUNDS));
     }
 
     private Map<String, Object> summarize(ContentState state) {
