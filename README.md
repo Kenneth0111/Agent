@@ -71,7 +71,15 @@ npm --prefix frontend run build
 
 `DEEPSEEK_API_KEY` 为空时后端仍能启动，网关对每次调用返回 `MODEL_NOT_CONFIGURED`，不会静默降级成假回复。失败按 `MODEL_AUTH_FAILED`、`MODEL_TIMEOUT`、`MODEL_UPSTREAM_FAILED`、`MODEL_INVALID_OUTPUT` 区分；供应商原始错误正文不进入接口响应和日志。付费调用不自动重试，是否重试由任务状态决定。JSON 结果缺字段或不是 JSON 都判为失败，不保存为内容。
 
-模型测试使用本机临时 HTTP 服务模拟 OpenAI 兼容响应，不发生真实付费调用；真实 DeepSeek 调用需要凭据，尚未验收。
+模型测试使用本机临时 HTTP 服务模拟 OpenAI 兼容响应，不发生真实付费调用。
+
+验收真实供应商接入需要把密钥写进本机 `.env` 的 `DEEPSEEK_API_KEY`（不要贴进聊天、文档或提交），然后运行：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy RemoteSigned -File scripts/verify-model.ps1
+```
+
+这会发生 2 次真实付费调用：一次短文本回复，一次结构化 JSON 解析。没有密钥时 `DeepSeekLiveCallTest` 会被跳过，跳过不算接入已验证。
 
 ## 本地 Tool 与图流程
 

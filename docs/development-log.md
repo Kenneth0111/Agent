@@ -72,3 +72,9 @@
 - Ruling: 不引入 `dev.langchain4j:langchain4j` 主包的反射式工具分发。显式 `LocalTool` 接口让归属校验成为必须写出的普通代码，也少一层依赖。
 - Ruling: 示例账号目录先放在内存里并标注由 W2-D2 的账号表替换，不提前建数据库结构。
 - Ruling: PowerShell 的 `Set-Content` 会按本机 ANSI 编码改写文件并破坏源码中的中文，本项目改用编辑工具修改带中文的源文件。
+
+## 2026-09-24 · W1-D4 真实调用验收入口 · 待凭据
+
+- 交付：`DeepSeekLiveCallTest` 仅在环境变量 `DEEPSEEK_API_KEY` 非空时运行，共 2 次真实调用（短文本 + 结构化 JSON）；`scripts/verify-model.ps1` 导入 `.env` 后只运行该测试，缺少密钥时直接报错而不是静默通过。
+- 验证：当前本机无密钥，该测试按条件跳过（`Tests run: 2, Skipped: 2`），其余 23 项测试不受影响。跳过不作为供应商接入已验证的证据。
+- 未完成：等待密钥写入本机 `.env` 后执行一次真实调用并记录脱敏结果与用量，届时才勾选 W1-D4。
