@@ -54,3 +54,21 @@
 - Ruling: 付费调用设 `maxRetries(0)`。客户端静默重试会重复计费且掩盖超时后结果未知的情况，重试交给后续持久任务按状态决定。
 - Ruling: 失败只向调用方暴露稳定错误码，不透传供应商错误正文，避免密钥或上游细节进入日志与接口响应。
 - Ruling: 凭据缺失不阻止应用启动，而是在调用时返回明确的未配置错误；本机与 CI 都没有凭据，启动失败会挡住其他任务的开发和验证。
+
+## 2026-09-24 · W1-D5 · 已完成
+
+- 交付：只读工具 `read_account_profile`（`AccountProfileTool`）、示例账号目录、`ModelGateway.replyUsingTools` 的有界工具循环，以及用 LangGraph4j 串联「读取账号配置 → 生成摘要」两个节点的 `ContentWorkflow`。
+- 依赖：`org.bsc.langgraph4j:langgraph4j-core:1.8.19`。工具调用直接使用 LangChain4j 的 `ToolSpecification` / `ToolExecutionRequest` / `ToolExecutionResultMessage`，不引入基于反射的工具分发，越权检查是普通代码。
+- 隔离：工具实例在每次运行时用状态里的 userId 构造，模型只能传 `accountId`；查找只在该用户自己的账号中进行，他人账号与不存在账号同样返回 `ACCOUNT_NOT_FOUND`。
+- 上限：工具调用最多 3 轮，第 4 次请求按 `AGENT_TOOL_LIMIT` 结束；图另设步数上限作为第二道保护。
+- 验证：后端 23 项测试通过（`mvn -f backend/pom.xml test`）。`AgentIntegrationTest` 覆盖模型选工具、结果回传（断言第二次上行请求带 `role: tool` 与账号字段）、轮数上限、他人账号被拒、未知工具名和不可解析参数，并断言日志含工具名、状态和耗时。
+- 变异检查：把工具轮数上限临时改为 20，`anEndlessToolRequestLoopIsStoppedByTheRoundLimit` 立即失败（实际 21 次模型调用 vs 期望 4 次），确认该断言不是空转；随后恢复为 3。
+- 测试替身：新增 `OpenAiStubServer` 供模型与 Agent 测试共用，可脚本化返回 tool_calls 或文本，并保留上行请求正文用于断言，`ModelGatewayTest` 一并改用它。没有发生真实付费调用。
+- 未完成：W1-D4 的真实 DeepSeek 调用仍缺凭据；W1-D6 的 MCP 搜索与对话页尚未开始。
+
+### 执行决定
+
+- Ruling: 工具执行失败（越权、未知工具、坏参数）作为工具结果回传给模型，而不是直接终止运行；模型可以据此说明情况，同时上行内容里不出现任何越权数据。
+- Ruling: 不引入 `dev.langchain4j:langchain4j` 主包的反射式工具分发。显式 `LocalTool` 接口让归属校验成为必须写出的普通代码，也少一层依赖。
+- Ruling: 示例账号目录先放在内存里并标注由 W2-D2 的账号表替换，不提前建数据库结构。
+- Ruling: PowerShell 的 `Set-Content` 会按本机 ANSI 编码改写文件并破坏源码中的中文，本项目改用编辑工具修改带中文的源文件。

@@ -3,7 +3,10 @@ package com.example.creator.agent;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.langchain4j.agent.tool.ToolExecutionRequest;
+import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
+import dev.langchain4j.data.message.ToolExecutionResultMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.exception.AuthenticationException;
 import dev.langchain4j.exception.TimeoutException;
@@ -13,6 +16,11 @@ import dev.langchain4j.model.chat.request.ResponseFormat;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import java.net.SocketTimeoutException;
 import java.net.http.HttpTimeoutException;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -49,7 +57,59 @@ public class ModelGateway {
         return new InterviewDraft(requiredText(node, "question"), requiredText(node, "answer"));
     }
 
+    /**
+     * Lets the model call the given read-only tools, at most {@code maxToolRounds} times, before it
+     * must answer in text. Exceeding the bound fails the run instead of continuing to spend calls.
+     */
+    public String replyUsingTools(String operation, String systemPrompt, String userPrompt,
+                                  List<LocalTool> tools, int maxToolRounds) {
+        var byName = tools.stream().collect(Collectors.toMap(LocalTool::name, Function.identity()));
+        var specifications = tools.stream().map(LocalTool::specification).toList();
+        List<ChatMessage> messages = new ArrayList<>(List.of(
+                SystemMessage.from(systemPrompt), UserMessage.from(userPrompt)));
+        for (int round = 0; ; round++) {
+            var answer = send(operation, ChatRequest.builder()
+                    .messages(messages).toolSpecifications(specifications).build()).aiMessage();
+            if (answer == null || !answer.hasToolExecutionRequests()) {
+                var text = answer == null ? null : answer.text();
+                if (text == null || text.isBlank()) throw new ModelFailure("MODEL_INVALID_OUTPUT");
+                return text;
+            }
+            if (round == maxToolRounds) {
+                log.warn("agent run {} stopped: code=AGENT_TOOL_LIMIT rounds={}", operation, round);
+                throw new ModelFailure("AGENT_TOOL_LIMIT");
+            }
+            messages.add(answer);
+            answer.toolExecutionRequests().forEach(request ->
+                    messages.add(ToolExecutionResultMessage.from(request, execute(byName, request))));
+        }
+    }
+
+    private static String execute(Map<String, LocalTool> byName, ToolExecutionRequest request) {
+        var tool = byName.get(request.name());
+        long started = System.nanoTime();
+        if (tool == null) {
+            log.warn("tool {} rejected: status=UNKNOWN_TOOL durationMs={}", request.name(),
+                    elapsedMillis(started));
+            return "UNKNOWN_TOOL";
+        }
+        try {
+            var result = tool.execute(request.arguments());
+            log.info("tool {} finished: status=OK durationMs={}", tool.name(), elapsedMillis(started));
+            return result;
+        } catch (LocalTool.ToolRejection rejection) {
+            log.warn("tool {} rejected: status={} durationMs={}", tool.name(), rejection.getMessage(),
+                    elapsedMillis(started));
+            return rejection.getMessage();
+        }
+    }
+
     private String call(String operation, ChatRequest request) {
+        var answer = send(operation, request).aiMessage();
+        return answer == null ? null : answer.text();
+    }
+
+    private ChatResponse send(String operation, ChatRequest request) {
         if (model == null) throw new ModelFailure("MODEL_NOT_CONFIGURED");
         long started = System.nanoTime();
         ChatResponse response;
@@ -65,7 +125,7 @@ public class ModelGateway {
         log.info("model call {} succeeded: durationMs={} inputTokens={} outputTokens={}", operation,
                 elapsedMillis(started), usage == null ? null : usage.inputTokenCount(),
                 usage == null ? null : usage.outputTokenCount());
-        return response.aiMessage() == null ? null : response.aiMessage().text();
+        return response;
     }
 
     private static String requiredText(JsonNode node, String field) {

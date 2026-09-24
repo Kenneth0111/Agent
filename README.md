@@ -73,6 +73,14 @@ npm --prefix frontend run build
 
 模型测试使用本机临时 HTTP 服务模拟 OpenAI 兼容响应，不发生真实付费调用；真实 DeepSeek 调用需要凭据，尚未验收。
 
+## 本地 Tool 与图流程
+
+`read_account_profile` 是只读工具，返回账号的定位、栏目和每周条数。工具实例在每次运行时用登录得到的 userId 构造，模型给出的 `accountId` 只能在该用户自己的账号里查找；不属于本人的账号与不存在的账号都返回 `ACCOUNT_NOT_FOUND`，不泄漏其他用户是否有该账号。未知工具名返回 `UNKNOWN_TOOL`，参数不可解析返回 `TOOL_ARGUMENTS_INVALID`，两种情况都交回模型说明而不是直接执行。
+
+账号配置目前是内存中的示例数据，W2-D2 建表后替换为真实账号。
+
+`ContentWorkflow` 用 LangGraph4j 串联读取账号配置和生成摘要两个节点。工具调用最多 3 轮，超出按 `AGENT_TOOL_LIMIT` 结束；图另有步数上限作为第二道保护，因此不会无限调用。工具执行在日志中记录工具名、状态和耗时。
+
 接入实现参考：[Spring Security 会话管理](https://docs.spring.io/spring-security/reference/6.5/servlet/authentication/session-management.html)、[CSRF](https://docs.spring.io/spring-security/reference/6.5/servlet/exploits/csrf.html)、[Redisson 配置](https://redisson.pro/docs/configuration/)、[Testcontainers MySQL](https://java.testcontainers.org/modules/databases/mysql/)。
 
 ## 进度与提交
