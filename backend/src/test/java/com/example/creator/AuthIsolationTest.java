@@ -10,7 +10,11 @@ import java.nio.charset.StandardCharsets;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.security.MessageDigest;
+import java.sql.Timestamp;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -109,6 +113,47 @@ class AuthIsolationTest extends IntegrationTestSupport {
         assertThat(get(client, "/api/auth/me").statusCode()).isEqualTo(401);
     }
 
+    @Test
+    void validInvitationRegistersOnlyOneUserEvenWhenUsedConcurrently() throws Exception {
+        var code = "invite-" + UUID.randomUUID();
+        createInvitation(code, java.time.Instant.now().plusSeconds(3600));
+        var first = client();
+        var second = client();
+        var firstToken = csrf(first);
+        var secondToken = csrf(second);
+        var ready = new CountDownLatch(2);
+        var start = new CountDownLatch(1);
+        try (var workers = Executors.newFixedThreadPool(2)) {
+            var firstResult = workers.submit(() -> {
+                ready.countDown();
+                start.await();
+                return register(first, firstToken, code, UUID.randomUUID() + "@example.test");
+            });
+            var secondResult = workers.submit(() -> {
+                ready.countDown();
+                start.await();
+                return register(second, secondToken, code, UUID.randomUUID() + "@example.test");
+            });
+            assertThat(ready.await(5, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+            start.countDown();
+            var statuses = java.util.List.of(firstResult.get().statusCode(), secondResult.get().statusCode());
+            assertThat(statuses).containsExactlyInAnyOrder(201, 400);
+        }
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM invitations WHERE used_at IS NOT NULL", Integer.class))
+                .isEqualTo(1);
+    }
+
+    @Test
+    void invalidAndExpiredInvitationsDoNotRegisterUsers() throws Exception {
+        var client = client();
+        assertThat(register(client, csrf(client), "not-issued", "unknown@example.test").statusCode()).isEqualTo(400);
+        var expired = "invite-" + UUID.randomUUID();
+        createInvitation(expired, java.time.Instant.now().minusSeconds(1));
+        assertThat(register(client, csrf(client), expired, "expired@example.test").statusCode()).isEqualTo(400);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM users WHERE email IN (?, ?)", Integer.class,
+                "unknown@example.test", "expired@example.test")).isZero();
+    }
+
     private String createUser() {
         var email = UUID.randomUUID() + "@example.test";
         jdbc.update("INSERT INTO users (email, password_hash, display_name) VALUES (?, ?, ?)",
@@ -118,6 +163,26 @@ class AuthIsolationTest extends IntegrationTestSupport {
 
     private HttpResponse<String> login(HttpClient client, String email, String password) throws Exception {
         return post(client, "/api/auth/login", form(email, password), csrf(client));
+    }
+
+    private HttpResponse<String> register(HttpClient client, JsonNode csrf, String invitationCode, String email) throws Exception {
+        var body = json.createObjectNode()
+                .put("invitationCode", invitationCode)
+                .put("email", email)
+                .put("displayName", "受邀创作者")
+                .put("password", PASSWORD)
+                .toString();
+        return client.send(HttpRequest.newBuilder(uri("/api/auth/register"))
+                .header("Content-Type", "application/json")
+                .header(csrf.get("headerName").asText(), csrf.get("token").asText())
+                .POST(HttpRequest.BodyPublishers.ofString(body))
+                .build(), HttpResponse.BodyHandlers.ofString());
+    }
+
+    private void createInvitation(String code, java.time.Instant expiresAt) throws Exception {
+        var hash = java.util.HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+                .digest(code.getBytes(StandardCharsets.UTF_8)));
+        jdbc.update("INSERT INTO invitations (code_hash, expires_at) VALUES (?, ?)", hash, Timestamp.from(expiresAt));
     }
 
     private String form(String email, String password) {

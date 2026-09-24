@@ -46,13 +46,15 @@ npm --prefix frontend run dev
 
 ## 开发账号与登录
 
-初始化脚本生成 `DEV_USER_PASSWORD`。只有启用 `dev` profile 时，后端才会创建 `creator-a@example.test`、`creator-b@example.test` 两个开发账号；密码在本机 `.env` 查看，不写入文档、日志或仓库。数据库只保存 BCrypt 哈希。重启不会覆盖已有账号密码；修改 `.env` 不会重置数据库中的旧账号。
+初始化脚本生成 `DEV_USER_PASSWORD` 和 `DEV_INVITE_CODE`。只有启用 `dev` profile 时，后端才会创建 `creator-a@example.test`、`creator-b@example.test` 两个开发账号，并将开发邀请码的 SHA-256 摘要存入数据库，默认有效期 7 天。密码和邀请码只在本机 `.env` 查看，不写入文档、日志或仓库。数据库只保存 BCrypt 密码哈希和邀请码摘要。重启不会覆盖已有账号或再次延长邀请码；修改 `.env` 不会重置数据库中的旧记录。
 
-如果 `.env` 来自早期版本，请手动增加 `SPRING_PROFILES_ACTIVE=dev` 和一个至少 16 字符的随机 `DEV_USER_PASSWORD`，不要重新生成数据库密码。正式环境使用独立数据库，不启用 `dev`，通过邀请注册创建用户；邀请功能尚未实现。
+如果 `.env` 来自早期版本，请手动增加 `SPRING_PROFILES_ACTIVE=dev`、一个至少 16 字符的随机 `DEV_USER_PASSWORD` 以及随机 `DEV_INVITE_CODE`，不要重新生成数据库密码。正式环境使用独立数据库且不启用 `dev`；当前已实现受邀注册，但正式环境的邀请码签发后台尚未实现。
 
 浏览器用同源 `/api` 访问后端，会话保存在 Redis，通过 HttpOnly、SameSite=Lax 的 `CREATOR_SESSION` Cookie 传递，闲置 30 分钟过期。HTTPS 部署时配置 `SESSION_COOKIE_SECURE=true`。
 
 接口：`GET /api/auth/csrf` 获取 CSRF header/token；`POST /api/auth/login` 提交 `application/x-www-form-urlencoded` 的 `email`、`password` 及 CSRF header；`GET /api/auth/me` 返回当前身份；`POST /api/auth/logout` 携带重新获取的 CSRF token 退出。登录时轮换会话，退出使旧会话失效；业务身份从后端登录上下文获取，请求里的 `userId` 不改变身份。
+
+`POST /api/auth/register` 同样需要 CSRF token，提交 JSON 的 `invitationCode`、`email`、`displayName` 和至少 12 位的 `password`。邀请码只保存 SHA-256 摘要，注册通过单条条件更新原子占用邀请码，并在同一事务创建用户：无效、过期、已用、重复邮箱和格式错误均返回 `REGISTRATION_REJECTED`，不会泄露邀请码或邮箱是否存在。前端注册成功后要求重新登录，不自动创建会话。
 
 ## 验证
 

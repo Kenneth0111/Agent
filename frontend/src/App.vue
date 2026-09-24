@@ -2,9 +2,11 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import LoginPage from './pages/LoginPage.vue'
 import ChatPage from './pages/ChatPage.vue'
+import RegisterPage from './pages/RegisterPage.vue'
 
 const connection = ref<'checking' | 'connected' | 'unavailable'>('checking')
 const signedIn = ref(false)
+const registering = ref(false)
 const connectionLabel = computed(() => ({
   checking: '正在连接服务',
   connected: '服务已连接',
@@ -49,7 +51,8 @@ onBeforeUnmount(() => controller?.abort())
         <p class="intro-copy">从一个值得分享的问题开始。整理资料，写下表达，<br class="desktop-break" />让每一次准备，都成为下一次创作的起点。</p>
       </section>
 
-      <LoginPage @auth-change="signedIn = $event" />
+      <LoginPage v-if="!registering" @auth-change="signedIn = $event" @register-requested="registering = true" />
+      <RegisterPage v-else @back="registering = false" />
       <ChatPage v-if="signedIn" />
 
       <section class="preparation" aria-labelledby="preparation-title">

@@ -3,7 +3,7 @@ import { onMounted, ref } from 'vue'
 import { HttpError, postWithCsrf, request } from '../api/http'
 
 interface User { id: number; email: string; displayName: string }
-const emit = defineEmits<{ authChange: [signedIn: boolean] }>()
+const emit = defineEmits<{ authChange: [signedIn: boolean]; registerRequested: [] }>()
 const user = ref<User | null>(null)
 const email = ref('')
 const password = ref('')
@@ -84,6 +84,7 @@ async function logout() {
         <label for="login-password">密码</label>
         <input id="login-password" v-model="password" type="password" autocomplete="current-password" required :disabled="pending" />
         <button type="submit" :disabled="pending">{{ pending ? '正在连接…' : '进入工作台' }} <span aria-hidden="true">↗</span></button>
+        <button class="register-link" type="button" :disabled="pending" @click="emit('registerRequested')">有邀请码？创建账号</button>
       </form>
       <p v-if="error" class="login-error" role="alert">{{ error }}</p>
     </div>
@@ -100,6 +101,7 @@ input { min-width: 0; width: 100%; border: 1px solid #b7c1b4; border-radius: 4px
 input:focus-visible { outline: 2px solid #718540; outline-offset: 2px; }
 button { cursor: pointer; border: 0; border-radius: 4px; padding: 12px 18px; background: #234d3b; color: #fff; margin-top: 9px; }
 button:disabled { cursor: wait; opacity: .6; }
+.register-link { background: none; color: #234d3b; padding: 4px 0; text-align: left; }
 .login-error { color: #a13d2d; font-size: 13px; line-height: 1.6; }
 @media (max-width: 760px) { .login-card { grid-template-columns: 1fr; gap: 16px; } }
 </style>

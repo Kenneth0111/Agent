@@ -26,7 +26,7 @@ public class SecurityConfig {
     SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         return http
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/api/health", "/api/auth/csrf", "/api/auth/login").permitAll()
+                        .requestMatchers("/api/health", "/api/auth/csrf", "/api/auth/login", "/api/auth/register").permitAll()
                         .anyRequest().authenticated())
                 .requestCache(cache -> cache.disable())
                 .exceptionHandling(errors -> errors

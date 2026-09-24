@@ -15,6 +15,7 @@ $settings = @(
     'SERVER_PORT=18080'
     'SPRING_PROFILES_ACTIVE=dev'
     ('DEV_USER_PASSWORD=' + (New-LocalSecret))
+    ('DEV_INVITE_CODE=' + (New-LocalSecret))
     ('MYSQL_ROOT_PASSWORD=' + (New-LocalSecret))
     ('DB_PASSWORD=' + (New-LocalSecret))
     ('REDIS_PASSWORD=' + (New-LocalSecret))

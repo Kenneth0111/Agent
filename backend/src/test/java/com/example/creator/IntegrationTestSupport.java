@@ -20,7 +20,7 @@ public abstract class IntegrationTestSupport {
 
     @DynamicPropertySource
     static void infrastructure(DynamicPropertyRegistry registry) {
-        registry.add("spring.datasource.url", MYSQL::getJdbcUrl);
+        registry.add("spring.datasource.url", () -> MYSQL.getJdbcUrl() + "?connectionTimeZone=UTC");
         registry.add("spring.datasource.username", MYSQL::getUsername);
         registry.add("spring.datasource.password", MYSQL::getPassword);
         registry.add("spring.data.redis.host", REDIS::getHost);
