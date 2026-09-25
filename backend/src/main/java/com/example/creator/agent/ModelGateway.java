@@ -44,6 +44,13 @@ public class ModelGateway {
         return text;
     }
 
+    public String replyJson(String prompt) {
+        var text = call("replyJson", ChatRequest.builder().messages(UserMessage.from(prompt))
+                .responseFormat(ResponseFormat.JSON).build());
+        if (text == null || text.isBlank()) throw new ModelFailure("MODEL_INVALID_OUTPUT");
+        return text;
+    }
+
     public InterviewDraft interviewDraft(String topic) {
         var text = call("interviewDraft", ChatRequest.builder()
                 .messages(SystemMessage.from(DRAFT_INSTRUCTION), UserMessage.from("主题：" + topic))

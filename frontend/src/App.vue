@@ -5,6 +5,7 @@ import ChatPage from './pages/ChatPage.vue'
 import RegisterPage from './pages/RegisterPage.vue'
 import AccountsPage from './pages/AccountsPage.vue'
 import MaterialsPage from './pages/MaterialsPage.vue'
+import GenerationPage from './pages/GenerationPage.vue'
 
 const connection = ref<'checking' | 'connected' | 'unavailable'>('checking')
 const signedIn = ref(false)
@@ -59,12 +60,13 @@ onBeforeUnmount(() => controller?.abort())
       <AccountsPage v-if="signedIn" @changed="accountRevision++" />
       <MaterialsPage v-if="signedIn" />
       <ChatPage v-if="signedIn" :key="accountRevision" />
+      <GenerationPage v-if="signedIn" :key="accountRevision" />
 
       <section class="preparation" aria-labelledby="preparation-title">
         <div class="preparation-copy">
           <span class="section-index">01 / 准备开始</span>
           <h2 id="preparation-title">你的创作空间正在搭建</h2>
-          <p>已开放登录、内容账号配置、资料导入与基于个人资料的问答。内容计划将在后续开发中逐步接入。</p>
+          <p>已开放登录、内容账号配置、资料导入、个人资料问答与内容草稿生成。内容计划将在后续开发中逐步接入。</p>
         </div>
         <div class="connection-panel">
           <span class="connection" :class="connection" role="status" aria-live="polite">

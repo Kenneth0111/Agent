@@ -24,7 +24,7 @@ public class ModelConfig {
         // Paid calls must not be repeated implicitly; retries are decided by the caller's task state.
         return OpenAiChatModel.builder()
                 .baseUrl(baseUrl).apiKey(apiKey).modelName(modelName)
-                .timeout(timeout).maxRetries(0).maxTokens(1024)
+                .timeout(timeout).maxRetries(0).maxTokens(2048)
                 .logRequests(false).logResponses(false)
                 .build();
     }

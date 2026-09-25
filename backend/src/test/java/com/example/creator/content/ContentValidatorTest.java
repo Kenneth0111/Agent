@@ -27,6 +27,16 @@ class ContentValidatorTest {
     }
 
     @Test
+    void boundedOutlineLinesAreJoinedWithoutRelaxingSourceValidation() {
+        var arrayOutline = VALID_TOPIC.replace("\"outline\":\"问题、简答、追问\"",
+                "\"outline\":[\"问题\",\"简答\",\"追问\"]");
+        assertThat(validator.topic(arrayOutline, Set.of("material-1")).outline())
+                .isEqualTo("问题\n简答\n追问");
+        assertThatThrownBy(() -> validator.topic(arrayOutline.replace("\"简答\"", "42"), Set.of("material-1")))
+                .isInstanceOf(ContentValidator.ContentInvalid.class).hasMessage("CONTENT_INVALID");
+    }
+
+    @Test
     void emptyScriptAndUnseenCitationAreRejected() {
         assertThatThrownBy(() -> validator.script("""
                 {"spokenText":" ","shootingNotes":"录屏","sourceIds":["material-1"]}

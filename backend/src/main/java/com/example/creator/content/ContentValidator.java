@@ -20,7 +20,7 @@ public class ContentValidator {
         var node = parse(raw);
         return validateTopic(new Topic(required(node, "column", 80), required(node, "title", 200),
                 required(node, "audience", 160), required(node, "angle", 500), required(node, "hook", 500),
-                required(node, "outline", 4000), sources(node), required(node, "rationale", 1000)), allowedSources);
+                outline(node), sources(node), required(node, "rationale", 1000)), allowedSources);
     }
 
     public Script script(String raw, Set<String> allowedSources) {
@@ -56,6 +56,19 @@ public class ContentValidator {
         var value = node.path(field);
         if (!value.isTextual()) throw new ContentInvalid("CONTENT_INVALID");
         return clean(value.asText(), maxLength);
+    }
+
+    private String outline(JsonNode node) {
+        var value = node.path("outline");
+        if (value.isTextual()) return clean(value.asText(), 4000);
+        if (!value.isArray() || value.isEmpty() || value.size() > 10)
+            throw new ContentInvalid("CONTENT_INVALID");
+        var lines = new ArrayList<String>();
+        value.forEach(line -> {
+            if (!line.isTextual()) throw new ContentInvalid("CONTENT_INVALID");
+            lines.add(clean(line.asText(), 500));
+        });
+        return clean(String.join("\n", lines), 4000);
     }
 
     private String clean(String value, int maxLength) {

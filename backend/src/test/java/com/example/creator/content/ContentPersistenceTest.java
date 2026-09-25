@@ -40,6 +40,12 @@ class ContentPersistenceTest extends IntegrationTestSupport {
                 Integer.class, savedTopic, owner)).isEqualTo(1);
         assertThat(jdbc.queryForObject("SELECT status FROM content_scripts WHERE id = ?",
                 String.class, savedScript)).isEqualTo("DRAFT");
+        assertThat(content.findTopic(owner, savedTopic)).get().extracting(ContentService.SavedTopic::topic)
+                .isEqualTo(topic);
+        assertThat(content.findScript(owner, savedScript)).get().extracting(ContentService.SavedScript::script)
+                .isEqualTo(script);
+        assertThat(content.findTopic(stranger, savedTopic)).isEmpty();
+        assertThat(content.findScript(stranger, savedScript)).isEmpty();
         assertThatThrownBy(() -> content.saveScript(stranger, savedTopic, script, Set.of("source-1")))
                 .isInstanceOf(ContentValidator.ContentInvalid.class).hasMessage("TOPIC_NOT_FOUND");
         assertThatThrownBy(() -> content.saveTopic(owner, account.id(), topic, Set.of("other-source")))
