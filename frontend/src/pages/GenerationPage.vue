@@ -7,6 +7,7 @@ interface Material { id: string; title: string; sourceUrl: string | null; accoun
 interface Topic { id: string; accountId: string; topic: { column: string; title: string; audience: string; angle: string; hook: string; outline: string; sourceIds: string[]; rationale: string } }
 interface Script { id: string; topicId: string; script: { spokenText: string; shootingNotes: string; sourceIds: string[] }; status: string; version: number; conversationId: string | null }
 interface ScriptVersion { version: number; script: { spokenText: string; shootingNotes: string; sourceIds: string[] }; instruction: string }
+interface WeekPlan { id: string; accountId: string; status: string; items: { column: string; topicId: string; scriptId: string }[] }
 interface Run { id: string; accountId: string; mode: string; status: 'SUCCEEDED' | 'FAILED'; resultId: string | null; errorCode: string | null; failedNode?: string | null }
 
 const accounts = ref<Account[]>([])
@@ -18,6 +19,8 @@ const materialIds = ref<string[]>([])
 const topics = ref<Topic[]>([])
 const topicId = ref('')
 const scripts = ref<Script[]>([])
+const weekPlans = ref<WeekPlan[]>([])
+const weekMaterials = ref({ java1: '', java2: '', english: '' })
 const revisions = ref<Record<string, string>>({})
 const histories = ref<Record<string, ScriptVersion[]>>({})
 const error = ref('')
@@ -51,6 +54,12 @@ function validScript(value: unknown): value is Script {
 function validRun(value: unknown): value is Run {
   return typeof value === 'object' && value !== null && 'status' in value && 'id' in value
     && (value.status === 'SUCCEEDED' || value.status === 'FAILED') && typeof value.id === 'string'
+}
+function validWeek(value: unknown): value is WeekPlan {
+  return typeof value === 'object' && value !== null && 'id' in value && 'accountId' in value
+    && 'items' in value && typeof value.id === 'string' && typeof value.accountId === 'string'
+    && Array.isArray(value.items) && value.items.every(item => typeof item === 'object' && item !== null
+      && typeof item.topicId === 'string' && typeof item.scriptId === 'string' && typeof item.column === 'string')
 }
 
 async function load() {
@@ -89,6 +98,17 @@ async function loadScripts() {
   } catch { error.value = '暂时无法读取已保存的脚本。' }
 }
 
+async function loadWeeks() {
+  weekPlans.value = []
+  weekMaterials.value = { java1: '', java2: '', english: '' }
+  if (!accountId.value) return
+  try {
+    const result = await request(`/api/generations/week-plans?accountId=${encodeURIComponent(accountId.value)}`)
+    if (!Array.isArray(result) || !result.every(validWeek)) throw new Error('Invalid week drafts')
+    weekPlans.value = result
+  } catch { error.value = '暂时无法读取已保存的整周草稿。' }
+}
+
 function source(id: string) { return materials.value.find(material => material.id === id) }
 function failureMessage(code: string | null) {
   return ({ INSUFFICIENT_MATERIAL: '缺少可引用的资料，请先导入资料并重新生成选题。',
@@ -100,7 +120,9 @@ function failureMessage(code: string | null) {
     VERSION_CONFLICT: '草稿已有新版本，已重新加载，请核对后再修改。',
     SOURCE_CHANGED: '修改稿改变了来源引用，请重试。' }[code ?? '']) ?? '生成失败，请稍后重试。'
 }
-function nodeLabel(node: string | null | undefined) {
+function nodeLabel(node: string | null | undefined): string {
+  const slot = /^slot(\d)\/(.+)$/.exec(node ?? '')
+  if (slot) return `第 ${slot[1]} 条 · ${nodeLabel(slot[2])}`
   return ({ readAccount: '读取账号', retrieveEvidence: '检索资料', generateDraft: '模型生成',
     validateDraft: '校验内容', saveDraft: '保存草稿' }[node ?? '']) ?? '生成流程'
 }
@@ -142,6 +164,29 @@ async function revise(item: Script) {
   } finally { pending.value = false }
 }
 
+async function generateWeek() {
+  if (pending.value || !accountId.value || !instruction.value.trim()
+    || !weekMaterials.value.java1 || !weekMaterials.value.java2 || !weekMaterials.value.english
+    || weekMaterials.value.java1 === weekMaterials.value.java2) return
+  pending.value = true
+  error.value = ''
+  run.value = null
+  try {
+    const result = await postJsonWithCsrf('/api/generations', { accountId: accountId.value,
+      mode: 'WEEK_PLAN', instruction: instruction.value.trim(), slots: [
+        { column: 'Java 面试', materialIds: [weekMaterials.value.java1], instruction: '第一条 Java 快问快答' },
+        { column: 'Java 面试', materialIds: [weekMaterials.value.java2], instruction: '第二条 Java 快问快答，避免重复第一条' },
+        { column: '英语跟读', materialIds: [weekMaterials.value.english], instruction: '一条英语跟读练习' },
+      ] }, 180_000)
+    if (!validRun(result)) throw new Error('Invalid week run')
+    run.value = result
+    if (result.status === 'FAILED') error.value = failureMessage(result.errorCode)
+    else await Promise.all([loadWeeks(), loadTopics()])
+  } catch (cause) {
+    error.value = cause instanceof HttpError ? failureMessage(cause.code ?? null) : '暂时无法生成整周草稿。'
+  } finally { pending.value = false }
+}
+
 async function showHistory(id: string) {
   if (pending.value) return
   if (histories.value[id]) { delete histories.value[id]; return }
@@ -156,6 +201,7 @@ async function showHistory(id: string) {
 }
 
 watch(accountId, loadTopics)
+watch(accountId, loadWeeks)
 watch(topicId, loadScripts)
 onMounted(load)
 </script>
@@ -190,10 +236,36 @@ onMounted(load)
       <button type="button" :disabled="pending || !accountId || !instruction.trim()" @click="generate('TOPICS')">
         {{ pending ? '生成中…' : '生成选题' }}
       </button>
+      <fieldset class="week-fields">
+        <legend>整周草稿 · 2 条 Java + 1 条英语</legend>
+        <label for="week-java-1">Java 参考资料 1</label>
+        <select id="week-java-1" v-model="weekMaterials.java1" :disabled="pending">
+          <option value="">请选择</option><option v-for="material in availableMaterials" :key="material.id" :value="material.id">{{ material.title }}</option>
+        </select>
+        <label for="week-java-2">Java 参考资料 2</label>
+        <select id="week-java-2" v-model="weekMaterials.java2" :disabled="pending">
+          <option value="">请选择</option><option v-for="material in availableMaterials" :key="material.id" :value="material.id">{{ material.title }}</option>
+        </select>
+        <label for="week-english">英语参考资料</label>
+        <select id="week-english" v-model="weekMaterials.english" :disabled="pending">
+          <option value="">请选择</option><option v-for="material in availableMaterials" :key="material.id" :value="material.id">{{ material.title }}</option>
+        </select>
+        <p>两条 Java 请选择不同资料。生成过程可能需要约 1–3 分钟，完成前请保持页面打开。</p>
+        <button type="button" :disabled="pending || !instruction.trim() || !weekMaterials.java1 || !weekMaterials.java2 || !weekMaterials.english || weekMaterials.java1 === weekMaterials.java2"
+          @click="generateWeek">{{ pending ? '生成中…' : '生成整周草稿' }}</button>
+      </fieldset>
       <p v-if="run" role="status">{{ run.status === 'SUCCEEDED' ? '已保存草稿。' : `${nodeLabel(run.failedNode)}失败（运行 ID：${run.id}）` }}</p>
       <p v-if="error" role="alert" class="error">{{ error }}</p>
     </div>
     <div class="results">
+      <div v-for="week in weekPlans" :key="week.id" class="result week-result">
+        <small>整周草稿 · {{ week.status }}</small>
+        <ol><li v-for="item in week.items" :key="item.topicId">
+          <button type="button" class="week-topic" @click="topicId = item.topicId">
+            {{ item.column }} · {{ topics.find(topic => topic.id === item.topicId)?.topic.title ?? item.topicId }}
+          </button>
+        </li></ol>
+      </div>
       <label for="generation-topic">已保存选题</label>
       <select id="generation-topic" v-model="topicId" :disabled="pending || !topics.length">
         <option value="">选择选题</option>
@@ -214,6 +286,7 @@ onMounted(load)
       </article>
       <article v-for="item in scripts" :key="item.id" class="result script">
         <small>脚本草稿 · 版本 {{ item.version }}</small>
+        <small>口播稿 {{ item.script.spokenText.length }} 字符 · 请按实际语速核对时长</small>
         <p class="preserve">{{ item.script.spokenText }}</p>
         <p class="preserve"><strong>拍摄建议：</strong>{{ item.script.shootingNotes }}</p>
         <ul class="sources"><li v-for="id in item.script.sourceIds" :key="id">{{ source(id)?.title ?? id }}</li></ul>
@@ -260,6 +333,10 @@ button:disabled { opacity: .6; cursor: wait; }
 .history-button { background: transparent; color: #234d3b; border: 1px solid #9aa88d; }
 .history { border-top: 1px dashed #b7c1b4; margin-top: 12px; }
 .history > div { padding: 10px 0; }
+.week-fields { display: grid; gap: 7px; max-height: none; }
+.week-fields p { margin: 0; }
+.week-result ol { padding-left: 20px; }
+.week-topic { background: transparent; color: #234d3b; padding: 2px; text-decoration: underline; }
 @media (max-width: 980px) { .generation-card { grid-template-columns: 1fr 1fr; } .heading { grid-column: 1 / -1; } }
 @media (max-width: 700px) { .generation-card { grid-template-columns: 1fr; padding: 24px; } .heading { grid-column: auto; } }
 </style>

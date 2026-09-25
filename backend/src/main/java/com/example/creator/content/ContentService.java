@@ -143,6 +143,50 @@ public class ContentService {
                 """, Boolean.class, conversationId, ownerId, accountId));
     }
 
+    @Transactional
+    public String saveWeekPlan(long ownerId, String accountId, List<WeekItem> items) {
+        if (accounts.find(ownerId, accountId).isEmpty()) throw new ContentValidator.ContentInvalid("ACCOUNT_NOT_FOUND");
+        if (items == null || items.size() != 3 || items.stream().filter(item -> "Java 面试".equals(item.column())).count() != 2
+                || items.stream().filter(item -> "英语跟读".equals(item.column())).count() != 1)
+            throw new ContentValidator.ContentInvalid("INVALID_WEEK_PLAN");
+        for (var item : items) {
+            var topic = findTopic(ownerId, item.topicId()).orElseThrow(() -> new ContentValidator.ContentInvalid("TOPIC_NOT_FOUND"));
+            var script = findScript(ownerId, item.scriptId()).orElseThrow(() -> new ContentValidator.ContentInvalid("SCRIPT_NOT_FOUND"));
+            if (!accountId.equals(topic.accountId()) || !topic.topic().column().equals(item.column())
+                    || !script.topicId().equals(item.topicId()))
+                throw new ContentValidator.ContentInvalid("INVALID_WEEK_PLAN");
+        }
+        var id = UUID.randomUUID().toString();
+        try {
+            jdbc.update("INSERT INTO content_week_plans (id, owner_id, account_id, items_json) VALUES (?, ?, ?, ?)",
+                    id, ownerId, accountId, json.writeValueAsString(items));
+        } catch (JsonProcessingException impossible) {
+            throw new IllegalStateException(impossible);
+        }
+        return id;
+    }
+
+    public Optional<WeekPlan> findWeekPlan(long ownerId, String id) {
+        try {
+            return Optional.ofNullable(jdbc.queryForObject("""
+                    SELECT id, account_id, items_json, status FROM content_week_plans
+                    WHERE id = ? AND owner_id = ?
+                    """, (row, index) -> new WeekPlan(row.getString("id"), row.getString("account_id"),
+                    readWeekItems(row.getString("items_json")), row.getString("status")), id, ownerId));
+        } catch (EmptyResultDataAccessException missing) {
+            return Optional.empty();
+        }
+    }
+
+    public List<WeekPlan> weekPlans(long ownerId, String accountId) {
+        if (accounts.find(ownerId, accountId).isEmpty()) throw new ContentValidator.ContentInvalid("ACCOUNT_NOT_FOUND");
+        return jdbc.query("""
+                SELECT id, account_id, items_json, status FROM content_week_plans
+                WHERE owner_id = ? AND account_id = ? ORDER BY created_at DESC, id DESC LIMIT 20
+                """, (row, index) -> new WeekPlan(row.getString("id"), row.getString("account_id"),
+                readWeekItems(row.getString("items_json")), row.getString("status")), ownerId, accountId);
+    }
+
     public List<ScriptVersion> versions(long ownerId, String scriptId) {
         if (findScript(ownerId, scriptId).isEmpty()) throw new ContentValidator.ContentInvalid("SCRIPT_NOT_FOUND");
         return jdbc.query("""
@@ -201,7 +245,8 @@ public class ContentService {
 
     public GenerationRun startRun(long ownerId, String accountId, String mode) {
         if (accounts.find(ownerId, accountId).isEmpty()) throw new ContentValidator.ContentInvalid("ACCOUNT_NOT_FOUND");
-        if (!List.of("TOPICS", "SCRIPT").contains(mode)) throw new ContentValidator.ContentInvalid("INVALID_MODE");
+        if (!List.of("TOPICS", "SCRIPT", "WEEK_PLAN").contains(mode))
+            throw new ContentValidator.ContentInvalid("INVALID_MODE");
         var id = UUID.randomUUID().toString();
         jdbc.update("INSERT INTO generation_runs (id, owner_id, account_id, mode, status) VALUES (?, ?, ?, ?, 'RUNNING')",
                 id, ownerId, accountId, mode);
@@ -267,6 +312,14 @@ public class ContentService {
         }
     }
 
+    private List<WeekItem> readWeekItems(String value) {
+        try {
+            return json.readValue(value, new com.fasterxml.jackson.core.type.TypeReference<List<WeekItem>>() { });
+        } catch (JsonProcessingException invalid) {
+            throw new IllegalStateException("Invalid saved week items", invalid);
+        }
+    }
+
     public record GenerationRun(String id, String accountId, String mode, String status,
                                 int attempts, String resultId, String errorCode, String failedNode) {
         public GenerationRun(String id, String accountId, String mode, String status,
@@ -282,5 +335,7 @@ public class ContentService {
         }
     }
     public record ScriptVersion(int version, Script script, String conversationId, String instruction) { }
+    public record WeekItem(String column, String topicId, String scriptId) { }
+    public record WeekPlan(String id, String accountId, List<WeekItem> items, String status) { }
     public static final class VersionConflict extends RuntimeException { }
 }

@@ -140,4 +140,32 @@ class ContentPersistenceTest extends IntegrationTestSupport {
                 "跨用户修改", shorter)).isInstanceOf(ContentValidator.ContentInvalid.class)
                 .hasMessage("SCRIPT_NOT_FOUND");
     }
+
+    @Test
+    void weekDraftStoresThreeOwnedTopicScriptPairs() {
+        long owner = jdbc.queryForObject("SELECT id FROM users WHERE email = ?", Long.class,
+                "creator-a@example.test");
+        long stranger = jdbc.queryForObject("SELECT id FROM users WHERE email = ?", Long.class,
+                "creator-b@example.test");
+        var account = accounts.create(owner, new AccountService.AccountInput("周草稿", "程序员",
+                "Java 面试和英语跟读", List.of("Java 面试", "英语跟读"), 3));
+        var items = new java.util.ArrayList<ContentService.WeekItem>();
+        for (int index = 0; index < 3; index++) {
+            var column = index == 2 ? "英语跟读" : "Java 面试";
+            var source = "source-" + index;
+            var topic = content.saveTopic(owner, account.id(), new ContentValidator.Topic(column,
+                    "选题 " + index, "程序员", "角度", "开头", "提纲", List.of(source), "资料"), Set.of(source));
+            var script = content.saveScript(owner, topic, new ContentValidator.Script(
+                    "脚本 " + index, "口播", List.of(source)), Set.of(source));
+            items.add(new ContentService.WeekItem(column, topic, script));
+        }
+        var weekId = content.saveWeekPlan(owner, account.id(), items);
+        assertThat(content.findWeekPlan(owner, weekId)).get().extracting(ContentService.WeekPlan::items)
+                .isEqualTo(items);
+        assertThat(content.weekPlans(owner, account.id())).extracting(ContentService.WeekPlan::id)
+                .contains(weekId);
+        assertThat(content.findWeekPlan(stranger, weekId)).isEmpty();
+        assertThatThrownBy(() -> content.saveWeekPlan(stranger, account.id(), items))
+                .isInstanceOf(ContentValidator.ContentInvalid.class).hasMessage("ACCOUNT_NOT_FOUND");
+    }
 }

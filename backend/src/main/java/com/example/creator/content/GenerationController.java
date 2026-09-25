@@ -49,6 +49,20 @@ public class GenerationController {
         return ResponseEntity.of(content.findTopic(currentUser.id(), id));
     }
 
+    @GetMapping("/week-plans")
+    public ResponseEntity<?> weekPlans(@RequestParam String accountId) {
+        try {
+            return ResponseEntity.ok(content.weekPlans(currentUser.id(), accountId));
+        } catch (ContentValidator.ContentInvalid invalid) {
+            return ResponseEntity.status(404).body(new ErrorView(invalid.getMessage()));
+        }
+    }
+
+    @GetMapping("/week-plans/{id}")
+    public ResponseEntity<ContentService.WeekPlan> weekPlan(@PathVariable String id) {
+        return ResponseEntity.of(content.findWeekPlan(currentUser.id(), id));
+    }
+
     @GetMapping("/topics")
     public ResponseEntity<?> topics(@RequestParam String accountId) {
         try {

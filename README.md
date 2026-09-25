@@ -2,7 +2,7 @@
 
 一个逐步开发中的 Java 内容创作与运营 Agent。目标是支持资料检索、选题、脚本、周排期及基于真实数据的复盘。
 
-当前已支持邀请注册、登录、按用户隔离的内容账号与资料、个人资料优先检索、Java 面试及英语跟读选题/脚本生成和定向修改。开发环境已用 DeepSeek 完成真实内容联调。抖音指标接入、整周草稿与自动运行仍在后续计划中。
+当前已支持邀请注册、登录、按用户隔离的内容账号与资料、个人资料优先检索、Java 面试及英语跟读选题/脚本生成、整周草稿和定向修改。开发环境已用 DeepSeek 完成真实内容联调。抖音指标接入、周日历及自动运行仍在后续计划中。
 
 ## 本地环境
 
@@ -109,9 +109,11 @@ MCP 采用 LangChain4j 的 Streamable HTTP Client。`GET /api/agent/mcp/tools` �
 
 ## 内容生成与修改
 
-V4/V4.1/V4.2 迁移保存选题、脚本、生成运行、失败节点、会话和旧版本。`GenerationGraph` 用 LangGraph4j 执行 `readAccount → retrieveEvidence → generateDraft → validateDraft → saveDraft`；来源 ID 只能选当前用户、当前账号可用的资料。模型输出结构错误最多修正一次，失败运行可查询 `errorCode` 与 `failedNode`。这不是可恢复执行的 LangGraph checkpoint。
+V4/V4.1/V4.2/V4.3 迁移保存选题、脚本、生成运行、失败节点、会话、旧版本和整周草稿。`GenerationGraph` 用 LangGraph4j 执行 `readAccount → retrieveEvidence → generateDraft → validateDraft → saveDraft`；来源 ID 只能选当前用户、当前账号可用的资料。模型输出结构错误最多修正一次，失败运行可查询 `errorCode` 与 `failedNode`。这不是可恢复执行的 LangGraph checkpoint。
 
 登录后在“内容生成”选择账号、栏目和最多 3 份参考资料，输入要求并生成选题；选择已保存选题后可生成脚本。没有匹配资料时允许保存标注“待核实”的选题，但不能生成无依据的脚本。`POST /api/generations` 使用 `mode=TOPICS` 或 `SCRIPT`，返回运行记录；`GET /api/generations/{id}` 查询运行。`GET /api/generations/topics?accountId=...` 和 `GET /api/generations/scripts?topicId=...` 让刷新页面后仍能读取草稿。
+
+`POST /api/generations` 的 `mode=WEEK_PLAN` 接收固定 3 个 `slots`（前两条 `Java 面试`，第三条 `英语跟读`），每条指定参考 `materialIds`；成功后产生 3 组选题与脚本及一个整周草稿 ID。`GET /api/generations/week-plans?accountId=...` 与 `GET /api/generations/week-plans/{id}` 可读取。整周生成目前为同步串行调用；若中途失败，已完成的单条草稿仍保留，整周草稿不会保存，重试可能产生重复单条草稿。正式用于定时运行前需加入请求幂等和断点续跑。
 
 `POST /api/generations/scripts/{id}/revise` 接收 `expectedVersion`、`instruction` 和可选的 `conversationId`，返回新版本与会话 ID；同一会话的最近 3 条修改要求进入模型上下文。旧版本在 `GET /api/generations/scripts/{id}/versions` 可查，来源 ID 必须保留；旧版本号写入返回 409。所有读写从登录态限定用户，跨用户脚本或会话不会进入模型上下文。内容生成和修改会真实调用模型，请先在 `.env` 设置 DeepSeek API Key。
 
