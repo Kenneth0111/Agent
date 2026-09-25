@@ -91,5 +91,11 @@ class ContentPersistenceTest extends IntegrationTestSupport {
         });
         assertThat(firstTry.attempts()).isEqualTo(1);
         assertThat(firstTry.status()).isEqualTo("SUCCEEDED");
+
+        var staged = content.startRun(owner, account.id(), "SCRIPT");
+        var nodeFailure = content.failRun(owner, staged.id(), "INSUFFICIENT_MATERIAL", "retrieveEvidence", 0);
+        assertThat(content.findRun(owner, staged.id())).contains(nodeFailure);
+        assertThat(nodeFailure.failedNode()).isEqualTo("retrieveEvidence");
+        assertThat(content.findRun(stranger, staged.id())).isEmpty();
     }
 }

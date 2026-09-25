@@ -66,11 +66,11 @@ public class ContentService {
     public Optional<GenerationRun> findRun(long ownerId, String runId) {
         try {
             return Optional.ofNullable(jdbc.queryForObject("""
-                    SELECT id, account_id, mode, status, attempts, result_id, error_code
+                    SELECT id, account_id, mode, status, attempts, result_id, error_code, failed_node
                     FROM generation_runs WHERE owner_id = ? AND id = ?
                     """, (row, index) -> new GenerationRun(row.getString("id"), row.getString("account_id"),
                     row.getString("mode"), row.getString("status"), row.getInt("attempts"),
-                    row.getString("result_id"), row.getString("error_code")), ownerId, runId));
+                    row.getString("result_id"), row.getString("error_code"), row.getString("failed_node")), ownerId, runId));
         } catch (EmptyResultDataAccessException missing) {
             return Optional.empty();
         }
@@ -142,9 +142,9 @@ public class ContentService {
         return findRun(ownerId, runId).orElseThrow();
     }
 
-    public GenerationRun failRun(long ownerId, String runId, String errorCode, int attempts) {
-        jdbc.update("UPDATE generation_runs SET status = 'FAILED', error_code = ?, attempts = ? WHERE owner_id = ? AND id = ?",
-                errorCode, attempts, ownerId, runId);
+    public GenerationRun failRun(long ownerId, String runId, String errorCode, String failedNode, int attempts) {
+        jdbc.update("UPDATE generation_runs SET status = 'FAILED', error_code = ?, failed_node = ?, attempts = ? WHERE owner_id = ? AND id = ?",
+                errorCode, failedNode, attempts, ownerId, runId);
         return findRun(ownerId, runId).orElseThrow();
     }
 
@@ -196,7 +196,12 @@ public class ContentService {
     }
 
     public record GenerationRun(String id, String accountId, String mode, String status,
-                                int attempts, String resultId, String errorCode) { }
-    public record SavedTopic(String id, String accountId, Topic topic) { }
+                                int attempts, String resultId, String errorCode, String failedNode) {
+        public GenerationRun(String id, String accountId, String mode, String status,
+                             int attempts, String resultId, String errorCode) {
+            this(id, accountId, mode, status, attempts, resultId, errorCode, null);
+        }
+    }
+    public record SavedTopic(String id, String accountId, Topic topic) implements java.io.Serializable { }
     public record SavedScript(String id, String topicId, Script script, String status, int version) { }
 }

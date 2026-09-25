@@ -156,5 +156,5 @@ public class MaterialService {
                                   String fileName, int segmentCount, String kind, List<String> accountIds) { }
     public record MaterialDetail(String id, String title, String purpose, String sourceUrl,
                                  String fileName, int segmentCount, String content, String kind,
-                                 List<String> accountIds) { }
+                                 List<String> accountIds) implements java.io.Serializable { }
 }

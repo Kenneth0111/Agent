@@ -19,6 +19,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.bsc.langgraph4j.GraphStateException;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -41,9 +42,9 @@ class GenerationServiceTest {
             null, 1, "volatile 字段写入与后续读取之间存在 happens-before 关系。", "TEXT", List.of("account-1"));
 
     @BeforeEach
-    void setUp() {
-        service = new GenerationService(accounts, materials, search, model,
-                new ContentValidator(new ObjectMapper()), content);
+    void setUp() throws GraphStateException {
+        service = new GenerationService(content, new GenerationGraph(accounts, materials, search, model,
+                new ContentValidator(new ObjectMapper()), content));
     }
 
     @Test
@@ -78,13 +79,15 @@ class GenerationServiceTest {
                 .thenReturn(new GenerationRun("run-1", "account-1", "TOPICS", "RUNNING", 0, null, null));
         when(materials.find(7, "m-1")).thenReturn(Optional.of(new MaterialDetail("m-1", "隔离资料", "参考",
                 null, null, 1, "secret", "TEXT", List.of("account-2"))));
-        when(content.failRun(7, "run-1", "MATERIAL_NOT_FOUND", 0))
-                .thenReturn(new GenerationRun("run-1", "account-1", "TOPICS", "FAILED", 0, null, "MATERIAL_NOT_FOUND"));
+        when(content.failRun(7, "run-1", "MATERIAL_NOT_FOUND", "retrieveEvidence", 0))
+                .thenReturn(new GenerationRun("run-1", "account-1", "TOPICS", "FAILED", 0, null,
+                        "MATERIAL_NOT_FOUND", "retrieveEvidence"));
 
         var run = service.generate(7, new GenerationService.Request("account-1", "TOPICS", "Java 面试",
                 "并发", List.of("m-1"), null));
 
         assertThat(run.errorCode()).isEqualTo("MATERIAL_NOT_FOUND");
+        assertThat(run.failedNode()).isEqualTo("retrieveEvidence");
         verify(model, never()).replyJson(any());
     }
 
@@ -111,5 +114,25 @@ class GenerationServiceTest {
         var prompt = ArgumentCaptor.forClass(String.class);
         verify(model).replyJson(prompt.capture());
         assertThat(prompt.getValue()).contains("英语跟读", "托福官方评分", "只引用提供的短片段");
+    }
+
+    @Test
+    void invalidModelJsonStopsAfterOneCorrectionAndNamesValidationNode() {
+        when(accounts.find(7, "account-1")).thenReturn(Optional.of(account));
+        when(content.startRun(7, "account-1", "TOPICS"))
+                .thenReturn(new GenerationRun("run-3", "account-1", "TOPICS", "RUNNING", 0, null, null));
+        when(materials.find(7, "m-1")).thenReturn(Optional.of(material));
+        when(model.replyJson(any())).thenReturn("{}");
+        when(content.failRun(7, "run-3", "CONTENT_INVALID", "validateDraft", 2))
+                .thenReturn(new GenerationRun("run-3", "account-1", "TOPICS", "FAILED", 2, null,
+                        "CONTENT_INVALID", "validateDraft"));
+
+        var run = service.generate(7, new GenerationService.Request("account-1", "TOPICS", "Java 面试",
+                "volatile", List.of("m-1"), null));
+
+        assertThat(run.failedNode()).isEqualTo("validateDraft");
+        assertThat(run.attempts()).isEqualTo(2);
+        org.mockito.Mockito.verify(model, org.mockito.Mockito.times(2)).replyJson(any());
+        verify(content, never()).saveTopic(org.mockito.ArgumentMatchers.anyLong(), any(), any(), any());
     }
 }

@@ -6,7 +6,7 @@ interface Account { id: string; name: string }
 interface Material { id: string; title: string; sourceUrl: string | null; accountIds: string[] }
 interface Topic { id: string; accountId: string; topic: { column: string; title: string; audience: string; angle: string; hook: string; outline: string; sourceIds: string[]; rationale: string } }
 interface Script { id: string; topicId: string; script: { spokenText: string; shootingNotes: string; sourceIds: string[] }; status: string; version: number }
-interface Run { id: string; accountId: string; mode: string; status: 'SUCCEEDED' | 'FAILED'; resultId: string | null; errorCode: string | null }
+interface Run { id: string; accountId: string; mode: string; status: 'SUCCEEDED' | 'FAILED'; resultId: string | null; errorCode: string | null; failedNode?: string | null }
 
 const accounts = ref<Account[]>([])
 const materials = ref<Material[]>([])
@@ -93,6 +93,10 @@ function failureMessage(code: string | null) {
     MODEL_TIMEOUT: '模型响应超时。', MODEL_AUTH_FAILED: 'DeepSeek 密钥验证失败。',
     MATERIAL_NOT_FOUND: '所选资料已不可用或不属于当前账号。', TOPIC_NOT_FOUND: '选题已不可用。' }[code ?? '']) ?? '生成失败，请稍后重试。'
 }
+function nodeLabel(node: string | null | undefined) {
+  return ({ readAccount: '读取账号', retrieveEvidence: '检索资料', generateDraft: '模型生成',
+    validateDraft: '校验内容', saveDraft: '保存草稿' }[node ?? '']) ?? '生成流程'
+}
 
 async function generate(mode: 'TOPICS' | 'SCRIPT') {
   if (pending.value || !accountId.value || !instruction.value.trim() || (mode === 'SCRIPT' && !topicId.value)) return
@@ -148,7 +152,7 @@ onMounted(load)
       <button type="button" :disabled="pending || !accountId || !instruction.trim()" @click="generate('TOPICS')">
         {{ pending ? '生成中…' : '生成选题' }}
       </button>
-      <p v-if="run" role="status">{{ run.status === 'SUCCEEDED' ? '已保存草稿。' : `生成失败（运行 ID：${run.id}）` }}</p>
+      <p v-if="run" role="status">{{ run.status === 'SUCCEEDED' ? '已保存草稿。' : `${nodeLabel(run.failedNode)}失败（运行 ID：${run.id}）` }}</p>
       <p v-if="error" role="alert" class="error">{{ error }}</p>
     </div>
     <div class="results">

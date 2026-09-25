@@ -102,8 +102,8 @@ public class ContentValidator {
     }
 
     public record Topic(String column, String title, String audience, String angle, String hook,
-                        String outline, List<String> sourceIds, String rationale) { }
-    public record Script(String spokenText, String shootingNotes, List<String> sourceIds) { }
+                        String outline, List<String> sourceIds, String rationale) implements java.io.Serializable { }
+    public record Script(String spokenText, String shootingNotes, List<String> sourceIds) implements java.io.Serializable { }
     public static final class ContentInvalid extends RuntimeException {
         public ContentInvalid(String code) { super(code, null, false, false); }
     }
