@@ -5,7 +5,7 @@ import { HttpError, postJsonWithCsrf, request } from '../api/http'
 interface Account { id: string; name: string; positioning: string; columns: string[]; weeklyTarget: number }
 interface Summary { accountId: string; summary: string }
 interface ResearchSource { materialId: string; title: string; snippet: string; sourceUrl: string | null; fileName: string | null; kind: string }
-interface Research { status: 'MATCHED' | 'INSUFFICIENT_MATERIAL'; answer: string | null; sources: ResearchSource[] }
+interface Research { status: 'MATCHED' | 'INSUFFICIENT_MATERIAL'; answer: string | null; sources: ResearchSource[]; webSearchStatus?: string | null }
 
 const accounts = ref<Account[]>([])
 const selectedAccount = ref('')
@@ -85,6 +85,10 @@ function messageFor(cause: unknown) {
   if (!(cause instanceof HttpError)) return '暂时无法完成请求，请稍后重试。'
   return ({ MODEL_NOT_CONFIGURED: '模型尚未配置，暂时不能生成内容。', MODEL_TIMEOUT: '模型响应超时，请稍后再试。',
     MODEL_UPSTREAM_FAILED: '模型服务暂时不可用，请稍后再试。', MODEL_AUTH_FAILED: '模型密钥验证失败。',
+    MCP_NOT_CONFIGURED: '联网搜索尚未配置；本地资料没有匹配结果。',
+    MCP_SEARCH_TOOL_UNAVAILABLE: '联网搜索服务没有提供预期的搜索工具。',
+    MCP_UNAVAILABLE: '联网搜索服务暂时不可用，请稍后重试。',
+    MCP_INVALID_RESULT: '联网搜索没有返回可引用的来源。',
     ACCOUNT_NOT_FOUND: '该账号已不可用，请刷新账号列表。', INVALID_QUERY: '请输入 100 字以内的问题。' }[cause.code ?? ''])
     ?? '暂时无法完成请求，请稍后重试。'
 }
@@ -97,7 +101,7 @@ onMounted(loadAccounts)
     <div>
       <span class="section-index">02 / 创作助手</span>
       <h2 id="chat-title">从账号定位开始准备</h2>
-      <p>先读取账号定位，或用当前账号可用的资料回答问题，并展示依据。</p>
+      <p>先读取账号定位，或用当前账号可用的资料回答问题，并展示依据。本地资料无匹配时，问题会发送给已配置的联网搜索服务。</p>
     </div>
     <div class="chat-controls">
       <template v-if="accounts.length">
@@ -118,10 +122,14 @@ onMounted(loadAccounts)
       <button v-else-if="!pending" type="button" @click="loadAccounts">重新读取账号 <span aria-hidden="true">↗</span></button>
       <p v-if="summary" class="agent-answer" role="status">{{ summary }}</p>
       <div v-if="research" class="research-answer" role="status">
-        <p v-if="research.status === 'INSUFFICIENT_MATERIAL'">当前账号的资料不足，暂不能给出有依据的回答。</p>
+        <p v-if="research.status === 'INSUFFICIENT_MATERIAL'">{{ research.webSearchStatus === 'MCP_NOT_CONFIGURED'
+          ? '当前账号资料不足；联网搜索尚未配置。'
+          : research.webSearchStatus ? '当前账号资料不足；联网搜索暂时不可用。'
+          : '本地资料和联网搜索均未找到足够依据。' }}</p>
         <p v-else>{{ research.answer }}</p>
         <ol v-if="research.sources.length" class="source-list">
           <li v-for="source in research.sources" :key="source.materialId">
+            <small v-if="source.kind === 'WEB'">网页来源 · 未经核实</small>
             <strong>{{ source.title }}</strong>
             <small>{{ source.snippet }}</small>
             <a v-if="source.sourceUrl" :href="source.sourceUrl" target="_blank" rel="noopener noreferrer">查看来源 ↗</a>

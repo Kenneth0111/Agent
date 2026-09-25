@@ -13,5 +13,8 @@ public class ResearchState extends AgentState {
     public String accountId() { return this.<String>value("accountId").orElseThrow(); }
     public String query() { return this.<String>value("query").orElseThrow(); }
     public Optional<SearchResponse> localEvidence() { return value("localEvidence"); }
+    public Optional<SearchResponse> webEvidence() { return value("webEvidence"); }
+    public Optional<String> webSearchStatus() { return value("webSearchStatus"); }
+    public SearchResponse evidence() { return webEvidence().orElseGet(() -> localEvidence().orElseThrow()); }
     public Optional<String> answer() { return value("answer"); }
 }

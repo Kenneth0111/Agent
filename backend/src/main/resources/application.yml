@@ -47,7 +47,7 @@ creator:
     search:
       url: ${MCP_SEARCH_URL:}
       bearer-token: ${MCP_SEARCH_BEARER_TOKEN:}
-      allowed-tools: ${MCP_SEARCH_ALLOWED_TOOLS:search}
+      allowed-tools: ${MCP_SEARCH_ALLOWED_TOOLS:tavily_search}
       timeout: ${MCP_SEARCH_TIMEOUT:10s}
 
 management:

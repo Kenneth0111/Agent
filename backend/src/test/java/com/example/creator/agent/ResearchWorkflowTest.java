@@ -17,10 +17,11 @@ import static org.mockito.Mockito.when;
 class ResearchWorkflowTest {
     private final MaterialSearchService search = mock(MaterialSearchService.class);
     private final ModelGateway model = mock(ModelGateway.class);
+    private final McpSearchGateway mcpSearch = mock(McpSearchGateway.class);
     private final ResearchWorkflow workflow;
 
     ResearchWorkflowTest() throws Exception {
-        workflow = new ResearchWorkflow(search, model, new ObjectMapper());
+        workflow = new ResearchWorkflow(search, model, mcpSearch, new ObjectMapper());
     }
 
     @Test
@@ -42,16 +43,46 @@ class ResearchWorkflowTest {
         // The answer stage calls the model without any tools, so a document cannot trigger tool execution.
         verify(model, never()).replyUsingTools(anyString(), anyString(), anyString(),
                 org.mockito.ArgumentMatchers.anyList(), org.mockito.ArgumentMatchers.anyInt());
+        verify(mcpSearch, never()).search(anyString());
     }
 
     @Test
-    void noMatchDoesNotSpendAmodelCallOrInventAnAnswer() {
+    void noMatchSearchesTheWebAndReturnsActualSources() {
         when(search.search(7L, "java", "unknown"))
+                .thenReturn(new SearchResponse("INSUFFICIENT_MATERIAL", List.of()));
+        var source = new SearchResult("https://example.test/article", "External article", "A relevant snippet",
+                "https://example.test/article", null, "WEB");
+        when(mcpSearch.search("unknown")).thenReturn(new SearchResponse("MATCHED", List.of(source)));
+        when(model.reply(anyString())).thenReturn("回答 [1]");
+        var response = workflow.research(7L, "java", "unknown");
+        assertThat(response.status()).isEqualTo("MATCHED");
+        assertThat(response.answer()).isEqualTo("回答 [1]");
+        assertThat(response.sources()).containsExactly(source);
+        verify(mcpSearch).search("unknown");
+    }
+
+    @Test
+    void emptyWebSearchDoesNotSpendAModelCallOrInventAnAnswer() {
+        when(search.search(7L, "java", "unknown"))
+                .thenReturn(new SearchResponse("INSUFFICIENT_MATERIAL", List.of()));
+        when(mcpSearch.search("unknown"))
                 .thenReturn(new SearchResponse("INSUFFICIENT_MATERIAL", List.of()));
         var response = workflow.research(7L, "java", "unknown");
         assertThat(response.status()).isEqualTo("INSUFFICIENT_MATERIAL");
         assertThat(response.answer()).isNull();
         assertThat(response.sources()).isEmpty();
+        verify(model, never()).reply(anyString());
+    }
+
+    @Test
+    void unconfiguredWebSearchKeepsTheInsufficientResultAndReportsTheReason() {
+        when(search.search(7L, "java", "unknown"))
+                .thenReturn(new SearchResponse("INSUFFICIENT_MATERIAL", List.of()));
+        when(mcpSearch.search("unknown"))
+                .thenThrow(new McpSearchGateway.McpFailure("MCP_NOT_CONFIGURED"));
+        var response = workflow.research(7L, "java", "unknown");
+        assertThat(response.status()).isEqualTo("INSUFFICIENT_MATERIAL");
+        assertThat(response.webSearchStatus()).isEqualTo("MCP_NOT_CONFIGURED");
         verify(model, never()).reply(anyString());
     }
 }

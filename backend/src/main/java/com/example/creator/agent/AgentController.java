@@ -82,6 +82,8 @@ public class AgentController {
                     failure.getMessage());
         } catch (ModelGateway.ModelFailure failure) {
             return error(statusFor(failure.getMessage()), failure.getMessage());
+        } catch (McpSearchGateway.McpFailure failure) {
+            return error(HttpStatus.SERVICE_UNAVAILABLE, failure.getMessage());
         }
     }
 

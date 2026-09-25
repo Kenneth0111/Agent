@@ -82,4 +82,13 @@ class AgentControllerTest {
         verify(research, never()).research(7L, "owned", " ");
         verify(research, never()).research(7L, "foreign", "volatile");
     }
+
+    @Test
+    void researchReportsUnconfiguredExternalSearchWithoutLeakingProviderDetails() {
+        when(research.research(7L, "owned", "unknown"))
+                .thenThrow(new McpSearchGateway.McpFailure("MCP_NOT_CONFIGURED"));
+        var response = controller.research(new AgentController.ResearchRequest("owned", "unknown"));
+        assertThat(response.getStatusCode()).isEqualTo(org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE);
+        assertThat(response.getBody()).isEqualTo(new AgentController.ErrorView("MCP_NOT_CONFIGURED"));
+    }
 }

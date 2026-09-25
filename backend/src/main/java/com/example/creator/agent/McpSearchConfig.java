@@ -14,7 +14,7 @@ public class McpSearchConfig {
     @Bean
     McpSearchGateway mcpSearchGateway(@Value("${creator.mcp.search.url:}") String endpoint,
                                       @Value("${creator.mcp.search.bearer-token:}") String bearerToken,
-                                      @Value("${creator.mcp.search.allowed-tools:search}") String allowedTools,
+                                      @Value("${creator.mcp.search.allowed-tools:tavily_search}") String allowedTools,
                                       @Value("${creator.mcp.search.timeout:10s}") Duration timeout) {
         var allowList = Arrays.stream(allowedTools.split(",")).map(String::strip)
                 .filter(name -> !name.isEmpty()).collect(Collectors.toUnmodifiableSet());

@@ -101,11 +101,11 @@ powershell -NoProfile -ExecutionPolicy RemoteSigned -File scripts/verify-model.p
 
 ## 对话与 MCP 搜索
 
-登录后，工作台会读取当前用户自己的账号，并可请求一条账号创作摘要。`POST /api/agent/research` 按所选账号先检索个人资料；有命中时只把最多 3 个片段作为不可信数据交给模型，回答和实际片段出处一同返回。资料不足时不调用模型，也不编造答案；网页搜索补充仍待接入 MCP 执行能力。后端会在运行工作流前检查账号归属；未配置模型时页面显示“模型尚未配置”，不会生成固定示例内容。
+登录后，工作台会读取当前用户自己的账号，并可请求一条账号创作摘要。`POST /api/agent/research` 按所选账号先检索个人资料；有命中时只把最多 3 个片段作为不可信数据交给模型，回答和实际片段出处一同返回。本地无命中时才把问题文本发送给已配置的 Tavily MCP 搜索服务；网页结果最多取 3 条带 URL 的片段，页面标记“网页来源 · 未经核实”。两处都无可用证据时不调用模型，也不编造答案。MCP 未配置或故障时仍返回 `INSUFFICIENT_MATERIAL`，并在 `webSearchStatus` 标出原因。后端会在运行工作流前检查账号归属；未配置模型时页面显示“模型尚未配置”，不会生成固定示例内容。
 
-MCP 采用 LangChain4j 的 Streamable HTTP Client。`GET /api/agent/mcp/tools` 只发现由 `MCP_SEARCH_ALLOWED_TOOLS` 显式允许的工具；用户请求不能指定 MCP 地址、认证头或工具名，因此第三方服务不会自动取得账号资料、会话或资料库内容。将 `MCP_SEARCH_URL`、`MCP_SEARCH_BEARER_TOKEN` 和已审查的工具名写入本机 `.env` 后，才会尝试连接。空配置返回 `MCP_NOT_CONFIGURED`，连接或协议失败返回 `MCP_UNAVAILABLE`。
+MCP 采用 LangChain4j 的 Streamable HTTP Client。`GET /api/agent/mcp/tools` 只发现由 `MCP_SEARCH_ALLOWED_TOOLS` 显式允许的工具；执行路径固定为 `tavily_search`，只传问题、基础搜索深度和最多 5 条的服务端结果上限，用户请求不能指定 MCP 地址、认证头或工具名。第三方服务不会取得账号资料、会话或资料库内容。在本机 `.env` 设置 `MCP_SEARCH_URL=https://mcp.tavily.com/mcp`、`MCP_SEARCH_BEARER_TOKEN=<你的 Tavily API Key>`、`MCP_SEARCH_ALLOWED_TOOLS=tavily_search` 后重启后端即可尝试连接。空配置返回 `MCP_NOT_CONFIGURED`，连接或协议失败返回 `MCP_UNAVAILABLE`；不要把密钥提交到仓库。
 
-目前尚未选定搜索 MCP 服务商，因此没有执行真实网页搜索，也没有把“发现工具”写成“已联网搜索”。确定服务商后，下一步会根据其实际查询工具的参数、返回来源字段和费用策略，接入受限的搜索执行功能。
+搜索适配按 [Tavily 官方 MCP 工具定义](https://github.com/tavily-ai/tavily-mcp/blob/main/src/index.ts)和[官方结果格式](https://github.com/tavily-ai/tavily-mcp/blob/main/src/format-results.ts)实现。本机未配置 Tavily 凭据，当前验证限于协议客户端的模拟返回、工作流分支和界面展示；尚未把真实 Tavily 远程搜索标记为通过。外部搜索可能产生供应商调用费用，配置前请核对 Tavily 账户额度。
 
 接入实现参考：[Spring Security 会话管理](https://docs.spring.io/spring-security/reference/6.5/servlet/authentication/session-management.html)、[CSRF](https://docs.spring.io/spring-security/reference/6.5/servlet/exploits/csrf.html)、[Redisson 配置](https://redisson.pro/docs/configuration/)、[Testcontainers MySQL](https://java.testcontainers.org/modules/databases/mysql/)、[LangChain4j MCP](https://docs.langchain4j.dev/tutorials/mcp/)。
 
