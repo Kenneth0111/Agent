@@ -107,6 +107,8 @@ MCP 采用 LangChain4j 的 Streamable HTTP Client。`GET /api/agent/mcp/tools` �
 
 搜索适配按 [Tavily 官方 MCP 工具定义](https://github.com/tavily-ai/tavily-mcp/blob/main/src/index.ts)和[官方结果格式](https://github.com/tavily-ai/tavily-mcp/blob/main/src/format-results.ts)实现。本机未配置 Tavily 凭据，当前验证限于协议客户端的模拟返回、工作流分支和界面展示；尚未把真实 Tavily 远程搜索标记为通过。外部搜索可能产生供应商调用费用，配置前请核对 Tavily 账户额度。
 
+W3 的内容基础表已由 V4 迁移创建：`content_topics` 保存选题字段及实际来源 ID，`content_scripts` 保存口播稿、拍摄建议、草稿状态和版本，`generation_runs` 保存生成状态、尝试次数与失败代码。当前只有后端内部保存与校验服务，尚未开放生成接口或页面。模型输出的来源 ID 必须属于本次检索结果；结构错误最多修正一次，第二次仍不合法时写入 `FAILED`，不会保存空脚本或伪造引用。
+
 接入实现参考：[Spring Security 会话管理](https://docs.spring.io/spring-security/reference/6.5/servlet/authentication/session-management.html)、[CSRF](https://docs.spring.io/spring-security/reference/6.5/servlet/exploits/csrf.html)、[Redisson 配置](https://redisson.pro/docs/configuration/)、[Testcontainers MySQL](https://java.testcontainers.org/modules/databases/mysql/)、[LangChain4j MCP](https://docs.langchain4j.dev/tutorials/mcp/)。
 
 ## 进度与提交
