@@ -105,7 +105,7 @@ powershell -NoProfile -ExecutionPolicy RemoteSigned -File scripts/verify-model.p
 
 MCP 采用 LangChain4j 的 Streamable HTTP Client。`GET /api/agent/mcp/tools` 只发现由 `MCP_SEARCH_ALLOWED_TOOLS` 显式允许的工具；执行路径固定为 `tavily_search`，只传问题、基础搜索深度和最多 5 条的服务端结果上限，用户请求不能指定 MCP 地址、认证头或工具名。第三方服务不会取得账号资料、会话或资料库内容。在本机 `.env` 设置 `MCP_SEARCH_URL=https://mcp.tavily.com/mcp`、`MCP_SEARCH_BEARER_TOKEN=<你的 Tavily API Key>`、`MCP_SEARCH_ALLOWED_TOOLS=tavily_search` 后重启后端即可尝试连接。空配置返回 `MCP_NOT_CONFIGURED`，连接或协议失败返回 `MCP_UNAVAILABLE`；不要把密钥提交到仓库。
 
-搜索适配按 [Tavily 官方 MCP 工具定义](https://github.com/tavily-ai/tavily-mcp/blob/main/src/index.ts)和[官方结果格式](https://github.com/tavily-ai/tavily-mcp/blob/main/src/format-results.ts)实现。本机未配置 Tavily 凭据，当前验证限于协议客户端的模拟返回、工作流分支和界面展示；尚未把真实 Tavily 远程搜索标记为通过。外部搜索可能产生供应商调用费用，配置前请核对 Tavily 账户额度。
+搜索适配按 [Tavily 官方 MCP 工具定义](https://github.com/tavily-ai/tavily-mcp/blob/main/src/index.ts)和[官方结果格式](https://github.com/tavily-ai/tavily-mcp/blob/main/src/format-results.ts)实现，同时接收远程服务实际返回的 JSON `results`。本机已用用户提供的私有凭据完成远程工具发现与真实搜索：资料不足时取得 3 条带 URL 的网页来源并生成回答；本地资料命中时只引用本地来源。凭据只在被 Git 忽略的 `.env` 中，其他机器与服务器仍需自行配置。外部搜索可能产生供应商调用费用，请核对 Tavily 账户额度。
 
 ## 内容生成与修改
 

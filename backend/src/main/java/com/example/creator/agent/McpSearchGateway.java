@@ -2,6 +2,8 @@ package com.example.creator.agent;
 
 import com.example.creator.material.MaterialSearchService.SearchResponse;
 import com.example.creator.material.MaterialSearchService.SearchResult;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.mcp.client.DefaultMcpClient;
 import dev.langchain4j.mcp.client.McpClient;
@@ -19,6 +21,7 @@ import org.slf4j.LoggerFactory;
 public class McpSearchGateway {
     private static final Logger log = LoggerFactory.getLogger(McpSearchGateway.class);
     private static final String SEARCH_TOOL = "tavily_search";
+    private static final ObjectMapper JSON = new ObjectMapper();
     private static final Pattern RESULT = Pattern.compile(
             "(?ms)^Title: ([^\\r\\n]*)\\r?\\n(?:ID: [^\\r\\n]*\\r?\\n)?URL: (https?://\\S+)\\r?\\nContent: (.*?)(?=\\r?\\n\\r?\\nTitle: |\\r?\\nRaw Content:|\\r?\\nFavicon:|\\r?\\nImages:|\\z)");
 
@@ -80,7 +83,7 @@ public class McpSearchGateway {
             client = clientFactory.create(endpoint, headers, timeout);
             if (client.listTools().stream().noneMatch(tool -> SEARCH_TOOL.equals(tool.name())))
                 throw new McpFailure("MCP_SEARCH_TOOL_UNAVAILABLE");
-            var arguments = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(Map.of(
+            var arguments = JSON.writeValueAsString(Map.of(
                     "query", query, "search_depth", "basic", "max_results", 5, "include_raw_content", false));
             var result = client.executeTool(ToolExecutionRequest.builder()
                     .name(SEARCH_TOOL).arguments(arguments).build());
@@ -107,25 +110,48 @@ public class McpSearchGateway {
     }
 
     private static List<SearchResult> parseResults(String text) {
-        if (text.length() > 100_000 || !text.contains("Detailed Results:"))
+        if (text.length() > 100_000)
             throw new McpFailure("MCP_INVALID_RESULT");
+        if (text.stripLeading().startsWith("{")) return parseJsonResults(text);
+        if (!text.contains("Detailed Results:")) throw new McpFailure("MCP_INVALID_RESULT");
         var matcher = RESULT.matcher(text);
         var results = new java.util.ArrayList<SearchResult>();
         while (matcher.find() && results.size() < 3) {
-            String url = matcher.group(2);
-            try {
-                var uri = URI.create(url);
-                if (!("https".equals(uri.getScheme()) || "http".equals(uri.getScheme()))
-                        || uri.getHost() == null) continue;
-            } catch (IllegalArgumentException invalidUrl) {
-                continue;
-            }
-            String snippet = matcher.group(3).strip();
-            if (snippet.isEmpty()) continue;
-            results.add(new SearchResult(url, matcher.group(1).strip(),
-                    snippet.substring(0, Math.min(snippet.length(), 600)), url, null, "WEB"));
+            addResult(results, matcher.group(1), matcher.group(2), matcher.group(3));
         }
         return results;
+    }
+
+    private static List<SearchResult> parseJsonResults(String text) {
+        try {
+            var root = JSON.readTree(text);
+            if (root.has("error")) throw new McpFailure("MCP_UNAVAILABLE");
+            var entries = root.path("results");
+            if (!entries.isArray()) throw new McpFailure("MCP_INVALID_RESULT");
+            var results = new java.util.ArrayList<SearchResult>();
+            for (var entry : entries) {
+                if (results.size() == 3) break;
+                addResult(results, entry.path("title").asText(""), entry.path("url").asText(""),
+                        entry.path("content").asText(""));
+            }
+            return results;
+        } catch (JsonProcessingException invalid) {
+            throw new McpFailure("MCP_INVALID_RESULT");
+        }
+    }
+
+    private static void addResult(List<SearchResult> results, String title, String url, String content) {
+        if (url == null || content == null || content.isBlank()) return;
+        try {
+            var uri = URI.create(url);
+            if (!("https".equals(uri.getScheme()) || "http".equals(uri.getScheme()))
+                    || uri.getHost() == null) return;
+        } catch (IllegalArgumentException invalidUrl) {
+            return;
+        }
+        var snippet = content.strip();
+        results.add(new SearchResult(url, title == null ? "" : title.strip(),
+                snippet.substring(0, Math.min(snippet.length(), 600)), url, null, "WEB"));
     }
 
     private static McpClient connect(String endpoint, Map<String, String> headers, Duration timeout) {

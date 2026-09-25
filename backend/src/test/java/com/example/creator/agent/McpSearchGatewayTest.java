@@ -81,6 +81,42 @@ class McpSearchGatewayTest {
     }
 
     @Test
+    void parsesLiveTavilyJsonResultsAndRejectsNonWebUrls() {
+        var client = mock(McpClient.class);
+        var result = mock(ToolExecutionResult.class);
+        when(client.listTools()).thenReturn(List.of(ToolSpecification.builder().name("tavily_search").build()));
+        when(result.resultText()).thenReturn("""
+                {"query":"Java","results":[
+                  {"title":"Official Java docs","url":"https://docs.example.test/java","content":"Version reference"},
+                  {"title":"Local file","url":"file:///secret","content":"not a web source"}
+                ]}
+                """);
+        when(client.executeTool(any())).thenReturn(result);
+        var gateway = new McpSearchGateway("https://mcp.example.test/mcp", Map.of(),
+                Set.of("tavily_search"), Duration.ofSeconds(1), (url, headers, timeout) -> client);
+
+        var response = gateway.search("Java");
+
+        assertThat(response.results()).hasSize(1);
+        assertThat(response.results().get(0).sourceUrl()).isEqualTo("https://docs.example.test/java");
+        assertThat(response.results().get(0).snippet()).isEqualTo("Version reference");
+    }
+
+    @Test
+    void providerErrorJsonDoesNotReachTheModelAsSearchEvidence() {
+        var client = mock(McpClient.class);
+        var result = mock(ToolExecutionResult.class);
+        when(client.listTools()).thenReturn(List.of(ToolSpecification.builder().name("tavily_search").build()));
+        when(result.resultText()).thenReturn("{\"error\":\"temporary provider failure\"}");
+        when(client.executeTool(any())).thenReturn(result);
+        var gateway = new McpSearchGateway("https://mcp.example.test/mcp", Map.of(),
+                Set.of("tavily_search"), Duration.ofSeconds(1), (url, headers, timeout) -> client);
+
+        assertThatThrownBy(() -> gateway.search("Java")).isInstanceOf(McpSearchGateway.McpFailure.class)
+                .hasMessage("MCP_UNAVAILABLE");
+    }
+
+    @Test
     void refusesSearchWhenTheProviderDoesNotAdvertiseTheAllowedTool() {
         var client = mock(McpClient.class);
         when(client.listTools()).thenReturn(List.of(ToolSpecification.builder().name("delete_records").build()));
