@@ -1,6 +1,7 @@
 package com.example.creator.content;
 
 import com.example.creator.auth.CurrentUser;
+import com.example.creator.agent.ModelGateway;
 import java.util.List;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -18,11 +19,14 @@ public class GenerationController {
     private final CurrentUser currentUser;
     private final GenerationService generation;
     private final ContentService content;
+    private final ConversationService conversation;
 
-    GenerationController(CurrentUser currentUser, GenerationService generation, ContentService content) {
+    GenerationController(CurrentUser currentUser, GenerationService generation, ContentService content,
+                         ConversationService conversation) {
         this.currentUser = currentUser;
         this.generation = generation;
         this.content = content;
+        this.conversation = conversation;
     }
 
     @PostMapping
@@ -65,6 +69,32 @@ public class GenerationController {
             return ResponseEntity.ok(content.scripts(currentUser.id(), topicId));
         } catch (ContentValidator.ContentInvalid invalid) {
             return ResponseEntity.status(404).body(new ErrorView(invalid.getMessage()));
+        }
+    }
+
+    @GetMapping("/scripts/{id}/versions")
+    public ResponseEntity<?> versions(@PathVariable String id) {
+        try {
+            return ResponseEntity.ok(content.versions(currentUser.id(), id));
+        } catch (ContentValidator.ContentInvalid invalid) {
+            return ResponseEntity.status(404).body(new ErrorView(invalid.getMessage()));
+        }
+    }
+
+    @PostMapping("/scripts/{id}/revise")
+    public ResponseEntity<?> revise(@PathVariable String id,
+                                    @RequestBody(required = false) ConversationService.Revision request) {
+        try {
+            return ResponseEntity.ok(conversation.revise(currentUser.id(), id, request));
+        } catch (ContentService.VersionConflict conflict) {
+            return ResponseEntity.status(409).body(new ErrorView("VERSION_CONFLICT"));
+        } catch (ContentValidator.ContentInvalid invalid) {
+            var code = invalid.getMessage();
+            return ResponseEntity.status(List.of("SCRIPT_NOT_FOUND", "TOPIC_NOT_FOUND", "CONVERSATION_NOT_FOUND",
+                    "MATERIAL_NOT_FOUND").contains(code) ? 404 : 400).body(new ErrorView(code));
+        } catch (ModelGateway.ModelFailure failure) {
+            return ResponseEntity.status("MODEL_TIMEOUT".equals(failure.getMessage()) ? 504 : 503)
+                    .body(new ErrorView(failure.getMessage()));
         }
     }
 

@@ -105,26 +105,98 @@ public class ContentService {
     public List<SavedScript> scripts(long ownerId, String topicId) {
         if (findTopic(ownerId, topicId).isEmpty()) throw new ContentValidator.ContentInvalid("TOPIC_NOT_FOUND");
         return jdbc.query("""
-                SELECT id, topic_id, spoken_text, shooting_notes, source_ids_json, status, version
+                SELECT id, topic_id, spoken_text, shooting_notes, source_ids_json, status, version, conversation_id
                 FROM content_scripts WHERE owner_id = ? AND topic_id = ? ORDER BY created_at DESC, id DESC LIMIT 50
                 """, (row, index) -> new SavedScript(row.getString("id"), row.getString("topic_id"),
                 new Script(row.getString("spoken_text"), row.getString("shooting_notes"),
                         readSources(row.getString("source_ids_json"))), row.getString("status"),
-                row.getInt("version")), ownerId, topicId);
+                row.getInt("version"), row.getString("conversation_id")), ownerId, topicId);
     }
 
     public Optional<SavedScript> findScript(long ownerId, String scriptId) {
         try {
             return Optional.ofNullable(jdbc.queryForObject("""
-                    SELECT id, topic_id, spoken_text, shooting_notes, source_ids_json, status, version
+                    SELECT id, topic_id, spoken_text, shooting_notes, source_ids_json, status, version, conversation_id
                     FROM content_scripts WHERE owner_id = ? AND id = ?
                     """, (row, index) -> new SavedScript(row.getString("id"), row.getString("topic_id"),
                     new Script(row.getString("spoken_text"), row.getString("shooting_notes"),
                             readSources(row.getString("source_ids_json"))), row.getString("status"),
-                    row.getInt("version")), ownerId, scriptId));
+                    row.getInt("version"), row.getString("conversation_id")), ownerId, scriptId));
         } catch (EmptyResultDataAccessException missing) {
             return Optional.empty();
         }
+    }
+
+    public List<String> recentInstructions(long ownerId, String conversationId) {
+        return jdbc.queryForList("""
+                SELECT v.instruction FROM content_script_versions v
+                JOIN content_scripts s ON s.id = v.script_id
+                WHERE s.owner_id = ? AND v.conversation_id = ?
+                ORDER BY v.created_at DESC LIMIT 3
+                """, String.class, ownerId, conversationId);
+    }
+
+    public boolean ownsConversation(long ownerId, String accountId, String conversationId) {
+        return Boolean.TRUE.equals(jdbc.queryForObject("""
+                SELECT EXISTS(SELECT 1 FROM generation_conversations
+                              WHERE id = ? AND owner_id = ? AND account_id = ?)
+                """, Boolean.class, conversationId, ownerId, accountId));
+    }
+
+    public List<ScriptVersion> versions(long ownerId, String scriptId) {
+        if (findScript(ownerId, scriptId).isEmpty()) throw new ContentValidator.ContentInvalid("SCRIPT_NOT_FOUND");
+        return jdbc.query("""
+                SELECT version, spoken_text, shooting_notes, source_ids_json, conversation_id, instruction
+                FROM content_script_versions WHERE script_id = ? ORDER BY version
+                """, (row, index) -> new ScriptVersion(row.getInt("version"),
+                new Script(row.getString("spoken_text"), row.getString("shooting_notes"),
+                        readSources(row.getString("source_ids_json"))), row.getString("conversation_id"),
+                row.getString("instruction")), scriptId);
+    }
+
+    @Transactional
+    public SavedScript reviseScript(long ownerId, String scriptId, int expectedVersion,
+                                     String conversationId, String instruction, Script revision) {
+        if (scriptId == null || expectedVersion < 1 || instruction == null || instruction.isBlank()
+                || instruction.strip().length() > 500)
+            throw new ContentValidator.ContentInvalid("INVALID_REVISION");
+        try {
+            jdbc.queryForObject("SELECT version FROM content_scripts WHERE owner_id = ? AND id = ? FOR UPDATE",
+                    Integer.class, ownerId, scriptId);
+        } catch (EmptyResultDataAccessException missing) {
+            throw new ContentValidator.ContentInvalid("SCRIPT_NOT_FOUND");
+        }
+        var previous = findScript(ownerId, scriptId).orElseThrow();
+        if (previous.version() != expectedVersion) throw new VersionConflict();
+        var accountId = findTopic(ownerId, previous.topicId()).orElseThrow().accountId();
+        var sources = Set.copyOf(previous.script().sourceIds());
+        var clean = validator.validateScript(revision, sources);
+        if (!sources.equals(Set.copyOf(clean.sourceIds())))
+            throw new ContentValidator.ContentInvalid("SOURCE_CHANGED");
+        String sessionId;
+        if (conversationId == null || conversationId.isBlank()) {
+            sessionId = UUID.randomUUID().toString();
+            jdbc.update("INSERT INTO generation_conversations (id, owner_id, account_id) VALUES (?, ?, ?)",
+                    sessionId, ownerId, accountId);
+        } else {
+            sessionId = conversationId;
+            if (!Boolean.TRUE.equals(jdbc.queryForObject("""
+                    SELECT EXISTS(SELECT 1 FROM generation_conversations
+                                  WHERE id = ? AND owner_id = ? AND account_id = ?)
+                    """, Boolean.class, sessionId, ownerId, accountId)))
+                throw new ContentValidator.ContentInvalid("CONVERSATION_NOT_FOUND");
+        }
+        jdbc.update("""
+                INSERT INTO content_script_versions (script_id, version, spoken_text, shooting_notes,
+                    source_ids_json, conversation_id, instruction) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, scriptId, previous.version(), previous.script().spokenText(), previous.script().shootingNotes(),
+                sourcesJson(previous.script().sourceIds()), sessionId, instruction.strip());
+        jdbc.update("""
+                UPDATE content_scripts SET spoken_text = ?, shooting_notes = ?, source_ids_json = ?,
+                    version = version + 1, conversation_id = ? WHERE id = ? AND owner_id = ?
+                """, clean.spokenText(), clean.shootingNotes(), sourcesJson(clean.sourceIds()),
+                sessionId, scriptId, ownerId);
+        return findScript(ownerId, scriptId).orElseThrow();
     }
 
     public GenerationRun startRun(long ownerId, String accountId, String mode) {
@@ -203,5 +275,12 @@ public class ContentService {
         }
     }
     public record SavedTopic(String id, String accountId, Topic topic) implements java.io.Serializable { }
-    public record SavedScript(String id, String topicId, Script script, String status, int version) { }
+    public record SavedScript(String id, String topicId, Script script, String status, int version,
+                              String conversationId) {
+        public SavedScript(String id, String topicId, Script script, String status, int version) {
+            this(id, topicId, script, status, version, null);
+        }
+    }
+    public record ScriptVersion(int version, Script script, String conversationId, String instruction) { }
+    public static final class VersionConflict extends RuntimeException { }
 }

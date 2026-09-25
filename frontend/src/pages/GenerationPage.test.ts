@@ -46,4 +46,25 @@ describe('content generation page', () => {
     expect(wrapper.text()).toContain('已保存草稿')
     wrapper.unmount()
   })
+
+  it('sends the selected script version and conversation when revising', async () => {
+    const script = { id: 'script-1', topicId: 'topic-1', script: { spokenText: '旧稿', shootingNotes: '录屏', sourceIds: ['material-1'] },
+      status: 'DRAFT', version: 2, conversationId: 'conversation-1' }
+    vi.mocked(request).mockImplementation(async path => {
+      if (path === '/api/accounts') return [account]
+      if (path === '/api/materials') return [material]
+      if (path.startsWith('/api/generations/topics?')) return [topic]
+      if (path.startsWith('/api/generations/scripts?')) return [script]
+      throw new Error(`Unexpected path ${path}`)
+    })
+    vi.mocked(postJsonWithCsrf).mockResolvedValue({ ...script, version: 3 })
+    const wrapper = mount(GenerationPage)
+    await flushPromises()
+    await wrapper.get('#revision-script-1').setValue('改成口播')
+    await wrapper.findAll('button').find(button => button.text() === '保存新版本')!.trigger('click')
+    await flushPromises()
+    expect(vi.mocked(postJsonWithCsrf)).toHaveBeenCalledWith('/api/generations/scripts/script-1/revise',
+      { conversationId: 'conversation-1', expectedVersion: 2, instruction: '改成口播' }, 65_000)
+    wrapper.unmount()
+  })
 })

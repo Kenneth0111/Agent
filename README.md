@@ -2,7 +2,7 @@
 
 一个逐步开发中的 Java 内容创作与运营 Agent。目标是支持资料检索、选题、脚本、周排期及基于真实数据的复盘。
 
-当前已支持邀请注册、登录、退出、按用户隔离的内部内容账号配置和服务连接检查，并接入 MySQL、Redis/Redisson。模型网关已按 DeepSeek 的 OpenAI 兼容接口实现，但本机尚无可用凭据，真实调用未验收。抖音数据接入和完整内容生成功能仍在后续计划中。
+当前已支持邀请注册、登录、按用户隔离的内容账号与资料、个人资料优先检索、Java 面试及英语跟读选题/脚本生成和定向修改。开发环境已用 DeepSeek 完成真实内容联调。抖音指标接入、整周草稿与自动运行仍在后续计划中。
 
 ## 本地环境
 
@@ -107,7 +107,15 @@ MCP 采用 LangChain4j 的 Streamable HTTP Client。`GET /api/agent/mcp/tools` �
 
 搜索适配按 [Tavily 官方 MCP 工具定义](https://github.com/tavily-ai/tavily-mcp/blob/main/src/index.ts)和[官方结果格式](https://github.com/tavily-ai/tavily-mcp/blob/main/src/format-results.ts)实现。本机未配置 Tavily 凭据，当前验证限于协议客户端的模拟返回、工作流分支和界面展示；尚未把真实 Tavily 远程搜索标记为通过。外部搜索可能产生供应商调用费用，配置前请核对 Tavily 账户额度。
 
-W3 的内容基础表已由 V4 迁移创建：`content_topics` 保存选题字段及实际来源 ID，`content_scripts` 保存口播稿、拍摄建议、草稿状态和版本，`generation_runs` 保存生成状态、尝试次数与失败代码。当前只有后端内部保存与校验服务，尚未开放生成接口或页面。模型输出的来源 ID 必须属于本次检索结果；结构错误最多修正一次，第二次仍不合法时写入 `FAILED`，不会保存空脚本或伪造引用。
+## 内容生成与修改
+
+V4/V4.1/V4.2 迁移保存选题、脚本、生成运行、失败节点、会话和旧版本。`GenerationGraph` 用 LangGraph4j 执行 `readAccount → retrieveEvidence → generateDraft → validateDraft → saveDraft`；来源 ID 只能选当前用户、当前账号可用的资料。模型输出结构错误最多修正一次，失败运行可查询 `errorCode` 与 `failedNode`。这不是可恢复执行的 LangGraph checkpoint。
+
+登录后在“内容生成”选择账号、栏目和最多 3 份参考资料，输入要求并生成选题；选择已保存选题后可生成脚本。没有匹配资料时允许保存标注“待核实”的选题，但不能生成无依据的脚本。`POST /api/generations` 使用 `mode=TOPICS` 或 `SCRIPT`，返回运行记录；`GET /api/generations/{id}` 查询运行。`GET /api/generations/topics?accountId=...` 和 `GET /api/generations/scripts?topicId=...` 让刷新页面后仍能读取草稿。
+
+`POST /api/generations/scripts/{id}/revise` 接收 `expectedVersion`、`instruction` 和可选的 `conversationId`，返回新版本与会话 ID；同一会话的最近 3 条修改要求进入模型上下文。旧版本在 `GET /api/generations/scripts/{id}/versions` 可查，来源 ID 必须保留；旧版本号写入返回 409。所有读写从登录态限定用户，跨用户脚本或会话不会进入模型上下文。内容生成和修改会真实调用模型，请先在 `.env` 设置 DeepSeek API Key。
+
+[W3 内容联调记录](docs/qa/2026-09-25-w3-generation.md)包含 3 道 Java 题和 1 条英语跟读的核对结果。脚本时长目前只由提示词引导，正式发布前仍需人工检查。
 
 接入实现参考：[Spring Security 会话管理](https://docs.spring.io/spring-security/reference/6.5/servlet/authentication/session-management.html)、[CSRF](https://docs.spring.io/spring-security/reference/6.5/servlet/exploits/csrf.html)、[Redisson 配置](https://redisson.pro/docs/configuration/)、[Testcontainers MySQL](https://java.testcontainers.org/modules/databases/mysql/)、[LangChain4j MCP](https://docs.langchain4j.dev/tutorials/mcp/)。
 

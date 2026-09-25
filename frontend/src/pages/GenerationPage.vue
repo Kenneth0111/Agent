@@ -5,7 +5,8 @@ import { HttpError, postJsonWithCsrf, request } from '../api/http'
 interface Account { id: string; name: string }
 interface Material { id: string; title: string; sourceUrl: string | null; accountIds: string[] }
 interface Topic { id: string; accountId: string; topic: { column: string; title: string; audience: string; angle: string; hook: string; outline: string; sourceIds: string[]; rationale: string } }
-interface Script { id: string; topicId: string; script: { spokenText: string; shootingNotes: string; sourceIds: string[] }; status: string; version: number }
+interface Script { id: string; topicId: string; script: { spokenText: string; shootingNotes: string; sourceIds: string[] }; status: string; version: number; conversationId: string | null }
+interface ScriptVersion { version: number; script: { spokenText: string; shootingNotes: string; sourceIds: string[] }; instruction: string }
 interface Run { id: string; accountId: string; mode: string; status: 'SUCCEEDED' | 'FAILED'; resultId: string | null; errorCode: string | null; failedNode?: string | null }
 
 const accounts = ref<Account[]>([])
@@ -17,6 +18,8 @@ const materialIds = ref<string[]>([])
 const topics = ref<Topic[]>([])
 const topicId = ref('')
 const scripts = ref<Script[]>([])
+const revisions = ref<Record<string, string>>({})
+const histories = ref<Record<string, ScriptVersion[]>>({})
 const error = ref('')
 const run = ref<Run | null>(null)
 const pending = ref(false)
@@ -43,6 +46,7 @@ function validScript(value: unknown): value is Script {
   return typeof value === 'object' && value !== null && 'id' in value && 'script' in value
     && typeof value.id === 'string' && typeof value.script === 'object' && value.script !== null
     && 'spokenText' in value.script && typeof value.script.spokenText === 'string'
+    && 'version' in value && typeof value.version === 'number'
 }
 function validRun(value: unknown): value is Run {
   return typeof value === 'object' && value !== null && 'status' in value && 'id' in value
@@ -91,7 +95,10 @@ function failureMessage(code: string | null) {
     CONTENT_INVALID: '模型输出格式不符合要求。', CONTENT_INVALID_AFTER_CORRECTION: '模型修正后仍未通过校验。',
     SOURCE_NOT_IN_EVIDENCE: '模型引用了未提供的资料。', MODEL_NOT_CONFIGURED: 'DeepSeek 尚未配置。',
     MODEL_TIMEOUT: '模型响应超时。', MODEL_AUTH_FAILED: 'DeepSeek 密钥验证失败。',
-    MATERIAL_NOT_FOUND: '所选资料已不可用或不属于当前账号。', TOPIC_NOT_FOUND: '选题已不可用。' }[code ?? '']) ?? '生成失败，请稍后重试。'
+    MATERIAL_NOT_FOUND: '所选资料已不可用或不属于当前账号。', TOPIC_NOT_FOUND: '选题已不可用。',
+    SCRIPT_NOT_FOUND: '脚本已不可用。', CONVERSATION_NOT_FOUND: '该会话已不可用。',
+    VERSION_CONFLICT: '草稿已有新版本，已重新加载，请核对后再修改。',
+    SOURCE_CHANGED: '修改稿改变了来源引用，请重试。' }[code ?? '']) ?? '生成失败，请稍后重试。'
 }
 function nodeLabel(node: string | null | undefined) {
   return ({ readAccount: '读取账号', retrieveEvidence: '检索资料', generateDraft: '模型生成',
@@ -115,6 +122,37 @@ async function generate(mode: 'TOPICS' | 'SCRIPT') {
   } catch (cause) {
     error.value = cause instanceof HttpError ? failureMessage(cause.code ?? null) : '暂时无法生成内容，请稍后重试。'
   } finally { pending.value = false }
+}
+
+async function revise(item: Script) {
+  const instruction = revisions.value[item.id]?.trim()
+  if (pending.value || !instruction) return
+  pending.value = true
+  error.value = ''
+  try {
+    const result = await postJsonWithCsrf(`/api/generations/scripts/${encodeURIComponent(item.id)}/revise`,
+      { conversationId: item.conversationId, expectedVersion: item.version, instruction }, 65_000)
+    if (!validScript(result)) throw new Error('Invalid revision')
+    revisions.value[item.id] = ''
+    delete histories.value[item.id]
+    await loadScripts()
+  } catch (cause) {
+    error.value = cause instanceof HttpError ? failureMessage(cause.code ?? null) : '暂时无法修改脚本。'
+    if (cause instanceof HttpError && cause.status === 409) await loadScripts()
+  } finally { pending.value = false }
+}
+
+async function showHistory(id: string) {
+  if (pending.value) return
+  if (histories.value[id]) { delete histories.value[id]; return }
+  try {
+    const result = await request(`/api/generations/scripts/${encodeURIComponent(id)}/versions`)
+    if (!Array.isArray(result) || !result.every(value => typeof value === 'object' && value !== null
+      && typeof value.version === 'number' && typeof value.instruction === 'string'
+      && typeof value.script === 'object' && value.script !== null
+      && typeof value.script.spokenText === 'string')) throw new Error('Invalid history')
+    histories.value[id] = result
+  } catch { error.value = '暂时无法读取旧版本。' }
 }
 
 watch(accountId, loadTopics)
@@ -179,6 +217,20 @@ onMounted(load)
         <p class="preserve">{{ item.script.spokenText }}</p>
         <p class="preserve"><strong>拍摄建议：</strong>{{ item.script.shootingNotes }}</p>
         <ul class="sources"><li v-for="id in item.script.sourceIds" :key="id">{{ source(id)?.title ?? id }}</li></ul>
+        <label :for="`revision-${item.id}`">定向修改这条脚本</label>
+        <textarea :id="`revision-${item.id}`" v-model="revisions[item.id]" rows="2" maxlength="500"
+          :disabled="pending" placeholder="例如：改成 45 秒口播，语气自然，保留事实和来源" />
+        <button type="button" :disabled="pending || !revisions[item.id]?.trim()" @click="revise(item)">保存新版本</button>
+        <button type="button" class="history-button" :disabled="pending" @click="showHistory(item.id)">
+          {{ histories[item.id] ? '收起历史版本' : '查看历史版本' }}
+        </button>
+        <div v-if="histories[item.id]" class="history">
+          <div v-for="older in histories[item.id]" :key="older.version">
+            <small>版本 {{ older.version }} · 后续修改要求：{{ older.instruction }}</small>
+            <p class="preserve">{{ older.script.spokenText }}</p>
+            <small>来源：{{ older.script.sourceIds.map(id => source(id)?.title ?? id).join('、') }}</small>
+          </div>
+        </div>
       </article>
     </div>
   </section>
@@ -203,6 +255,11 @@ button:disabled { opacity: .6; cursor: wait; }
 .sources { padding-left: 18px; }
 .sources a { text-decoration: underline; color: #234d3b; }
 .error { color: #a13d2d; }
+.script textarea { margin: 8px 0; }
+.script button { display: block; margin: 8px 0; }
+.history-button { background: transparent; color: #234d3b; border: 1px solid #9aa88d; }
+.history { border-top: 1px dashed #b7c1b4; margin-top: 12px; }
+.history > div { padding: 10px 0; }
 @media (max-width: 980px) { .generation-card { grid-template-columns: 1fr 1fr; } .heading { grid-column: 1 / -1; } }
 @media (max-width: 700px) { .generation-card { grid-template-columns: 1fr; padding: 24px; } .heading { grid-column: auto; } }
 </style>

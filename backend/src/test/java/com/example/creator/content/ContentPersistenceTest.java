@@ -98,4 +98,46 @@ class ContentPersistenceTest extends IntegrationTestSupport {
         assertThat(nodeFailure.failedNode()).isEqualTo("retrieveEvidence");
         assertThat(content.findRun(stranger, staged.id())).isEmpty();
     }
+
+    @Test
+    void scriptRevisionKeepsOldVersionAndIsolatesUsersDraftsAndConversations() {
+        long owner = jdbc.queryForObject("SELECT id FROM users WHERE email = ?", Long.class,
+                "creator-a@example.test");
+        long stranger = jdbc.queryForObject("SELECT id FROM users WHERE email = ?", Long.class,
+                "creator-b@example.test");
+        var account = accounts.create(owner, new AccountService.AccountInput("版本测试", "程序员",
+                "Java 面试", List.of("Java 面试"), 2));
+        var topic = new ContentValidator.Topic("Java 面试", "并发", "程序员", "可见性", "问题",
+                "问题和简答", List.of("m-1"), "资料");
+        var topicId = content.saveTopic(owner, account.id(), topic, Set.of("m-1"));
+        var base = new ContentValidator.Script("原版：录屏解释可见性。", "录屏", List.of("m-1"));
+        var firstId = content.saveScript(owner, topicId, base, Set.of("m-1"));
+        var secondId = content.saveScript(owner, topicId, base, Set.of("m-1"));
+        var mouth = new ContentValidator.Script("新版：口播解释可见性。", "正面口播", List.of("m-1"));
+
+        var revised = content.reviseScript(owner, firstId, 1, null, "改成口播", mouth);
+        assertThat(revised.version()).isEqualTo(2);
+        assertThat(revised.conversationId()).isNotBlank();
+        assertThat(content.versions(owner, firstId)).hasSize(1)
+                .first().extracting(ContentService.ScriptVersion::script).isEqualTo(base);
+        assertThat(content.findScript(owner, secondId)).get().extracting(ContentService.SavedScript::script)
+                .isEqualTo(base);
+        assertThat(content.findScript(stranger, firstId)).isEmpty();
+        assertThatThrownBy(() -> content.reviseScript(owner, firstId, 1, revised.conversationId(),
+                "旧版本覆盖", mouth)).isInstanceOf(ContentService.VersionConflict.class);
+
+        var shorter = new ContentValidator.Script("短版：volatile 保证可见性。", "口播", List.of("m-1"));
+        var third = content.reviseScript(owner, firstId, 2, revised.conversationId(), "缩短时长", shorter);
+        assertThat(third.version()).isEqualTo(3);
+        assertThat(content.recentInstructions(owner, revised.conversationId()))
+                .containsExactlyInAnyOrder("改成口播", "缩短时长");
+        var otherSession = content.reviseScript(owner, secondId, 1, null, "语气更严肃", mouth);
+        assertThat(otherSession.conversationId()).isNotEqualTo(revised.conversationId());
+        assertThat(content.recentInstructions(owner, otherSession.conversationId()))
+                .containsExactly("语气更严肃");
+        assertThat(content.recentInstructions(stranger, revised.conversationId())).isEmpty();
+        assertThatThrownBy(() -> content.reviseScript(stranger, firstId, 3, revised.conversationId(),
+                "跨用户修改", shorter)).isInstanceOf(ContentValidator.ContentInvalid.class)
+                .hasMessage("SCRIPT_NOT_FOUND");
+    }
 }
