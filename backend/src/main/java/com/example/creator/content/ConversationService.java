@@ -32,6 +32,7 @@ public class ConversationService {
             throw new ContentInvalid("INVALID_REVISION");
         var original = content.findScript(ownerId, scriptId).orElseThrow(() -> new ContentInvalid("SCRIPT_NOT_FOUND"));
         if (original.version() != request.expectedVersion()) throw new ContentService.VersionConflict();
+        if ("CONFIRMED".equals(original.status())) throw new ContentInvalid("SCRIPT_CONFIRMED");
         if (original.script().sourceIds().isEmpty()) throw new ContentInvalid("INSUFFICIENT_MATERIAL");
         var topic = content.findTopic(ownerId, original.topicId())
                 .orElseThrow(() -> new ContentInvalid("TOPIC_NOT_FOUND"));

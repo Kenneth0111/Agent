@@ -105,12 +105,39 @@ public class GenerationController {
         } catch (ContentValidator.ContentInvalid invalid) {
             var code = invalid.getMessage();
             return ResponseEntity.status(List.of("SCRIPT_NOT_FOUND", "TOPIC_NOT_FOUND", "CONVERSATION_NOT_FOUND",
-                    "MATERIAL_NOT_FOUND").contains(code) ? 404 : 400).body(new ErrorView(code));
+                    "MATERIAL_NOT_FOUND").contains(code) ? 404 : "SCRIPT_CONFIRMED".equals(code) ? 409 : 400)
+                    .body(new ErrorView(code));
         } catch (ModelGateway.ModelFailure failure) {
             return ResponseEntity.status("MODEL_TIMEOUT".equals(failure.getMessage()) ? 504 : 503)
                     .body(new ErrorView(failure.getMessage()));
         }
     }
 
+    @PostMapping("/scripts/{id}/confirm")
+    public ResponseEntity<?> confirm(@PathVariable String id, @RequestBody(required = false) StatusInput input) {
+        return changeStatus(id, input, true);
+    }
+
+    @PostMapping("/scripts/{id}/reopen")
+    public ResponseEntity<?> reopen(@PathVariable String id, @RequestBody(required = false) StatusInput input) {
+        return changeStatus(id, input, false);
+    }
+
+    private ResponseEntity<?> changeStatus(String id, StatusInput input, boolean confirm) {
+        if (input == null || input.expectedVersion() < 1)
+            return ResponseEntity.badRequest().body(new ErrorView("INVALID_VERSION"));
+        try {
+            return ResponseEntity.ok(confirm
+                    ? content.confirmScript(currentUser.id(), id, input.expectedVersion())
+                    : content.reopenScript(currentUser.id(), id, input.expectedVersion()));
+        } catch (ContentService.VersionConflict conflict) {
+            return ResponseEntity.status(409).body(new ErrorView("VERSION_CONFLICT"));
+        } catch (ContentValidator.ContentInvalid invalid) {
+            return ResponseEntity.status("SCRIPT_NOT_FOUND".equals(invalid.getMessage()) ? 404 : 409)
+                    .body(new ErrorView(invalid.getMessage()));
+        }
+    }
+
+    public record StatusInput(int expectedVersion) { }
     public record ErrorView(String code) { }
 }

@@ -60,6 +60,8 @@ npm --prefix frontend run dev
 
 周排期接口：`POST /api/schedules/weeks` 接收 `accountId` 与周一日期 `weekStart`（`YYYY-MM-DD`），为账号创建该周排期；同一账号同一周再次提交返回原排期。`GET /api/schedules/weeks?accountId=...&weekStart=...` 读取该周，`PUT /api/schedules/items/{id}/date` 接收 `expectedVersion` 与 `scheduledDate` 修改发布日期。日期按 `Asia/Shanghai` 的本地日历解释，只能落在所属周；版本冲突返回 409。初始计划项预留选题与脚本引用，新建时为空，后续生成流程负责关联。
 
+脚本确认接口：`POST /api/generations/scripts/{id}/confirm` 接收 `expectedVersion`，将待审阅草稿标为 `CONFIRMED`；`POST /api/generations/scripts/{id}/reopen` 用相同字段显式重新开放编辑。两种操作都会递增版本，旧版本返回 409；确认后的修改请求在调用模型前被拒绝。再次生成脚本会保存新的候选稿，不覆盖已有确认稿。
+
 ```powershell
 mvn -f backend/pom.xml test
 mvn -f backend/pom.xml package

@@ -127,6 +127,31 @@ public class ContentService {
         }
     }
 
+    @Transactional
+    public SavedScript confirmScript(long ownerId, String scriptId, int expectedVersion) {
+        return changeScriptStatus(ownerId, scriptId, expectedVersion, "DRAFT", "CONFIRMED");
+    }
+
+    @Transactional
+    public SavedScript reopenScript(long ownerId, String scriptId, int expectedVersion) {
+        return changeScriptStatus(ownerId, scriptId, expectedVersion, "CONFIRMED", "DRAFT");
+    }
+
+    private SavedScript changeScriptStatus(long ownerId, String scriptId, int expectedVersion,
+                                          String from, String to) {
+        var current = findScript(ownerId, scriptId)
+                .orElseThrow(() -> new ContentValidator.ContentInvalid("SCRIPT_NOT_FOUND"));
+        if (current.version() != expectedVersion) throw new VersionConflict();
+        if (!current.status().equals(from))
+            throw new ContentValidator.ContentInvalid("INVALID_SCRIPT_STATUS");
+        int changed = jdbc.update("""
+                UPDATE content_scripts SET status = ?, version = version + 1
+                WHERE owner_id = ? AND id = ? AND version = ? AND status = ?
+                """, to, ownerId, scriptId, expectedVersion, from);
+        if (changed == 0) throw new VersionConflict();
+        return findScript(ownerId, scriptId).orElseThrow();
+    }
+
     public List<String> recentInstructions(long ownerId, String conversationId) {
         return jdbc.queryForList("""
                 SELECT v.instruction FROM content_script_versions v
@@ -212,6 +237,8 @@ public class ContentService {
         }
         var previous = findScript(ownerId, scriptId).orElseThrow();
         if (previous.version() != expectedVersion) throw new VersionConflict();
+        if ("CONFIRMED".equals(previous.status()))
+            throw new ContentValidator.ContentInvalid("SCRIPT_CONFIRMED");
         var accountId = findTopic(ownerId, previous.topicId()).orElseThrow().accountId();
         var sources = Set.copyOf(previous.script().sourceIds());
         var clean = validator.validateScript(revision, sources);
