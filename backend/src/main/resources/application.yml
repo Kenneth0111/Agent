@@ -1,0 +1,61 @@
+spring:
+  application:
+    name: creator-agent
+  servlet:
+    multipart:
+      max-file-size: 5MB
+      max-request-size: 6MB
+  datasource:
+    url: ${DB_URL:jdbc:mysql://127.0.0.1:13306/creator_agent?connectionTimeZone=UTC}
+    username: ${DB_USER:creator}
+    password: ${DB_PASSWORD}
+    hikari:
+      maximum-pool-size: 5
+      minimum-idle: 1
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+  session:
+    timeout: 30m
+    redis:
+      namespace: creator:sessions
+  data:
+    redis:
+      host: ${REDIS_HOST:127.0.0.1}
+      port: ${REDIS_PORT:16379}
+      password: ${REDIS_PASSWORD}
+
+server:
+  address: ${SERVER_ADDRESS:127.0.0.1}
+  port: ${SERVER_PORT:18080}
+  servlet:
+    session:
+      cookie:
+        name: CREATOR_SESSION
+        http-only: true
+        same-site: lax
+        secure: ${SESSION_COOKIE_SECURE:false}
+
+creator:
+  model:
+    base-url: ${DEEPSEEK_BASE_URL:https://api.deepseek.com}
+    api-key: ${DEEPSEEK_API_KEY:}
+    name: ${DEEPSEEK_MODEL:deepseek-chat}
+    timeout: ${DEEPSEEK_TIMEOUT:30s}
+  mcp:
+    search:
+      url: ${MCP_SEARCH_URL:}
+      bearer-token: ${MCP_SEARCH_BEARER_TOKEN:}
+      allowed-tools: ${MCP_SEARCH_ALLOWED_TOOLS:tavily_search}
+      timeout: ${MCP_SEARCH_TIMEOUT:10s}
+
+management:
+  endpoints:
+    web:
+      base-path: /api
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: never
