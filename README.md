@@ -58,6 +58,8 @@ npm --prefix frontend run dev
 
 ## 验证
 
+周排期接口：`POST /api/schedules/weeks` 接收 `accountId` 与周一日期 `weekStart`（`YYYY-MM-DD`），为账号创建该周排期；同一账号同一周再次提交返回原排期。`GET /api/schedules/weeks?accountId=...&weekStart=...` 读取该周，`PUT /api/schedules/items/{id}/date` 接收 `expectedVersion` 与 `scheduledDate` 修改发布日期。日期按 `Asia/Shanghai` 的本地日历解释，只能落在所属周；版本冲突返回 409。初始计划项预留选题与脚本引用，新建时为空，后续生成流程负责关联。
+
 ```powershell
 mvn -f backend/pom.xml test
 mvn -f backend/pom.xml package
