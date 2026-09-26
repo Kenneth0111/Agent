@@ -24,6 +24,57 @@ beforeEach(() => {
 })
 
 describe('content generation page', () => {
+  it('ignores late topic and week responses after switching accounts', async () => {
+    let finishTopics!: (value: unknown) => void
+    let finishWeeks!: (value: unknown) => void
+    const otherTopic = { ...topic, id: 'topic-2', accountId: 'account-2',
+      topic: { ...topic.topic, title: '新账号选题' } }
+    vi.mocked(request).mockImplementation(async path => {
+      if (path === '/api/accounts') return [account, { id: 'account-2', name: '其他账号' }]
+      if (path === '/api/materials') return [material]
+      if (path === '/api/generations/topics?accountId=account-1') return new Promise(resolve => { finishTopics = resolve })
+      if (path === '/api/generations/week-plans?accountId=account-1') return new Promise(resolve => { finishWeeks = resolve })
+      if (path === '/api/generations/topics?accountId=account-2') return [otherTopic]
+      return []
+    })
+    const wrapper = mount(GenerationPage)
+    await flushPromises()
+    await wrapper.get('#generation-account').setValue('account-2')
+    await flushPromises()
+    finishTopics([topic])
+    finishWeeks([{ id: 'week-1', accountId: 'account-1', status: 'DRAFT',
+      items: [{ column: 'Java 面试', topicId: 'topic-1', scriptId: 'script-1' }] }])
+    await flushPromises()
+    expect(wrapper.get('#generation-topic').text()).toContain('新账号选题')
+    expect(wrapper.get('#generation-topic').text()).not.toContain('volatile 快问快答')
+    expect(wrapper.findAll('.week-result')).toHaveLength(0)
+    wrapper.unmount()
+  })
+
+  it('keeps the selected topic script when an older script request finishes late', async () => {
+    let finishOld!: (value: unknown) => void
+    const makeScript = (id: string, topicId: string, spokenText: string) => ({ id, topicId,
+      script: { spokenText, shootingNotes: '口播', sourceIds: ['material-1'] },
+      status: 'DRAFT', version: 1, conversationId: null })
+    vi.mocked(request).mockImplementation(async path => {
+      if (path === '/api/accounts') return [account]
+      if (path === '/api/materials') return [material]
+      if (path.startsWith('/api/generations/topics?')) return [topic, { ...topic, id: 'topic-2' }]
+      if (path === '/api/generations/scripts?topicId=topic-1') return new Promise(resolve => { finishOld = resolve })
+      if (path === '/api/generations/scripts?topicId=topic-2') return [makeScript('script-2', 'topic-2', '新选题脚本')]
+      return []
+    })
+    const wrapper = mount(GenerationPage)
+    await flushPromises()
+    await wrapper.get('#generation-topic').setValue('topic-2')
+    await flushPromises()
+    finishOld([makeScript('script-1', 'topic-1', '旧选题脚本')])
+    await flushPromises()
+    expect(wrapper.get('.script').text()).toContain('新选题脚本')
+    expect(wrapper.get('.script').text()).not.toContain('旧选题脚本')
+    wrapper.unmount()
+  })
+
   it('loads saved drafts after mount and shows their source', async () => {
     const wrapper = mount(GenerationPage)
     await flushPromises()

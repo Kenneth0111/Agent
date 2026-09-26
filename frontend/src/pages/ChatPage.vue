@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { HttpError, postJsonWithCsrf, request } from '../api/http'
 
 interface Account { id: string; name: string; positioning: string; columns: string[]; weeklyTarget: number }
@@ -36,7 +36,7 @@ async function generateSummary() {
   error.value = ''
   summary.value = ''
   try {
-    const result = await postJsonWithCsrf('/api/agent/account-summaries', { accountId: selectedAccount.value })
+    const result = await postJsonWithCsrf('/api/agent/account-summaries', { accountId: selectedAccount.value }, 65_000)
     if (!validSummary(result) || result.accountId !== selectedAccount.value) throw new Error('Invalid summary response')
     summary.value = result.summary
   } catch (cause) {
@@ -52,7 +52,7 @@ async function askFromMaterials() {
   try {
     const result = await postJsonWithCsrf('/api/agent/research', {
       accountId: selectedAccount.value, query: query.value.trim(),
-    })
+    }, 90_000)
     if (!validResearch(result)) throw new Error('Invalid research response')
     research.value = result
   } catch (cause) { error.value = messageFor(cause) }
@@ -93,6 +93,11 @@ function messageFor(cause: unknown) {
     ?? '暂时无法完成请求，请稍后重试。'
 }
 
+watch(selectedAccount, () => {
+  summary.value = ''
+  research.value = null
+  error.value = ''
+})
 onMounted(loadAccounts)
 </script>
 

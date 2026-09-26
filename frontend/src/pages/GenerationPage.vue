@@ -26,6 +26,9 @@ const histories = ref<Record<string, ScriptVersion[]>>({})
 const error = ref('')
 const run = ref<Run | null>(null)
 const pending = ref(false)
+let topicsRequest = 0
+let scriptsRequest = 0
+let weeksRequest = 0
 const selectedTopic = computed(() => topics.value.find(topic => topic.id === topicId.value))
 const availableMaterials = computed(() => materials.value.filter(material => material.accountIds.length === 0 || material.accountIds.includes(accountId.value)))
 
@@ -76,37 +79,43 @@ async function load() {
 }
 
 async function loadTopics() {
+  const currentRequest = ++topicsRequest
   topics.value = []
   topicId.value = ''
   materialIds.value = []
   if (!accountId.value) return
   try {
     const result = await request(`/api/generations/topics?accountId=${encodeURIComponent(accountId.value)}`)
+    if (currentRequest !== topicsRequest) return
     if (!Array.isArray(result) || !result.every(validTopic)) throw new Error('Invalid topics')
     topics.value = result
     topicId.value = result[0]?.id ?? ''
-  } catch { error.value = '暂时无法读取已保存的选题。' }
+  } catch { if (currentRequest === topicsRequest) error.value = '暂时无法读取已保存的选题。' }
 }
 
 async function loadScripts() {
+  const currentRequest = ++scriptsRequest
   scripts.value = []
   if (!topicId.value) return
   try {
     const result = await request(`/api/generations/scripts?topicId=${encodeURIComponent(topicId.value)}`)
+    if (currentRequest !== scriptsRequest) return
     if (!Array.isArray(result) || !result.every(validScript)) throw new Error('Invalid scripts')
     scripts.value = result
-  } catch { error.value = '暂时无法读取已保存的脚本。' }
+  } catch { if (currentRequest === scriptsRequest) error.value = '暂时无法读取已保存的脚本。' }
 }
 
 async function loadWeeks() {
+  const currentRequest = ++weeksRequest
   weekPlans.value = []
   weekMaterials.value = { java1: '', java2: '', english: '' }
   if (!accountId.value) return
   try {
     const result = await request(`/api/generations/week-plans?accountId=${encodeURIComponent(accountId.value)}`)
+    if (currentRequest !== weeksRequest) return
     if (!Array.isArray(result) || !result.every(validWeek)) throw new Error('Invalid week drafts')
     weekPlans.value = result
-  } catch { error.value = '暂时无法读取已保存的整周草稿。' }
+  } catch { if (currentRequest === weeksRequest) error.value = '暂时无法读取已保存的整周草稿。' }
 }
 
 function source(id: string) { return materials.value.find(material => material.id === id) }
