@@ -36,7 +36,8 @@ async function generateSummary() {
   error.value = ''
   summary.value = ''
   try {
-    const result = await postJsonWithCsrf('/api/agent/account-summaries', { accountId: selectedAccount.value }, 65_000)
+    // Three tool rounds can require four model calls, followed by the summary call.
+    const result = await postJsonWithCsrf('/api/agent/account-summaries', { accountId: selectedAccount.value }, 180_000)
     if (!validSummary(result) || result.accountId !== selectedAccount.value) throw new Error('Invalid summary response')
     summary.value = result.summary
   } catch (cause) {

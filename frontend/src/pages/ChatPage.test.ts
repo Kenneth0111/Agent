@@ -25,6 +25,7 @@ describe('creator chat', () => {
 
   it.each(['summary', 'research'] as const)('waits for a %s result that needs more than ten seconds', async mode => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const responseDelay = mode === 'summary' ? 70_000 : 12_000
     vi.stubGlobal('fetch', vi.fn()
       .mockResolvedValueOnce(Response.json([{ id: 'java', name: 'Java 账号', positioning: '面试', columns: [], weeklyTarget: 2 }]))
       .mockResolvedValueOnce(Response.json({ headerName: 'X-CSRF-TOKEN', token: 'csrf' }))
@@ -32,14 +33,14 @@ describe('creator chat', () => {
         options.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')))
         setTimeout(() => resolve(Response.json(mode === 'summary'
           ? { accountId: 'java', summary: '慢速返回的摘要' }
-          : { status: 'MATCHED', answer: '慢速返回的答案', sources: [] })), 12_000)
+          : { status: 'MATCHED', answer: '慢速返回的答案', sources: [] })), responseDelay)
       })))
     const wrapper = mount(ChatPage)
     await flushPromises()
     if (mode === 'research') await wrapper.get('#agent-query').setValue('JDK 发布说明')
     await wrapper.findAll('button')[mode === 'summary' ? 0 : 1].trigger('click')
     await flushPromises()
-    await vi.advanceTimersByTimeAsync(11_000)
+    await vi.advanceTimersByTimeAsync(responseDelay - 1_000)
     await flushPromises()
     expect(wrapper.find('[role="alert"]').exists()).toBe(false)
     expect(wrapper.get('select').attributes('disabled')).toBeDefined()
