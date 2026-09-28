@@ -85,4 +85,20 @@ class ResearchWorkflowTest {
         assertThat(response.webSearchStatus()).isEqualTo("MCP_NOT_CONFIGURED");
         verify(model, never()).reply(anyString());
     }
+
+    @Test
+    void failedWebSearchDoesNotInventAnAnswer() {
+        when(search.search(7L, "java", "unknown"))
+                .thenReturn(new SearchResponse("INSUFFICIENT_MATERIAL", List.of()));
+        when(mcpSearch.search("unknown"))
+                .thenThrow(new McpSearchGateway.McpFailure("MCP_UNAVAILABLE"));
+
+        var response = workflow.research(7L, "java", "unknown");
+
+        assertThat(response.status()).isEqualTo("INSUFFICIENT_MATERIAL");
+        assertThat(response.webSearchStatus()).isEqualTo("MCP_UNAVAILABLE");
+        assertThat(response.answer()).isNull();
+        assertThat(response.sources()).isEmpty();
+        verify(model, never()).reply(anyString());
+    }
 }
