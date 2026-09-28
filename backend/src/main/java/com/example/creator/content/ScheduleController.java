@@ -102,12 +102,28 @@ public class ScheduleController {
         }
     }
 
+    @PutMapping("/items/{id}/publication")
+    public ResponseEntity<?> publication(@PathVariable String id,
+                                         @RequestBody(required = false) PublicationInput input) {
+        if (input == null || input.expectedVersion() < 1 || input.published() == null)
+            return ResponseEntity.badRequest().body(new ErrorView("INVALID_PUBLICATION"));
+        try {
+            return ResponseEntity.ok(schedules.setPublication(currentUser.id(), id, input.expectedVersion(),
+                    input.published(), input.publicationUrl(), input.externalWorkId()));
+        } catch (ContentService.VersionConflict conflict) {
+            return ResponseEntity.status(409).body(new ErrorView("VERSION_CONFLICT"));
+        } catch (ContentValidator.ContentInvalid invalid) {
+            return failure(invalid);
+        }
+    }
+
     private ResponseEntity<ErrorView> failure(ContentValidator.ContentInvalid invalid) {
         var code = invalid.getMessage();
         return ResponseEntity.status("ACCOUNT_NOT_FOUND".equals(code) || "PLAN_ITEM_NOT_FOUND".equals(code)
                 || "PLAN_NOT_FOUND".equals(code) || "WEEK_PLAN_NOT_FOUND".equals(code)
                 || "TOPIC_NOT_FOUND".equals(code) || "SCRIPT_NOT_FOUND".equals(code)
                 ? 404 : "PLAN_ITEM_OCCUPIED".equals(code) || "SCRIPT_CONFIRMED".equals(code)
+                || "SCRIPT_NOT_CONFIRMED".equals(code)
                 ? 409 : 400).body(new ErrorView(code));
     }
 
@@ -115,6 +131,8 @@ public class ScheduleController {
     public record DateInput(int expectedVersion, LocalDate scheduledDate) { }
     public record ColumnInput(int expectedVersion, String column) { }
     public record BatchInput(String batchId) { }
+    public record PublicationInput(int expectedVersion, Boolean published,
+                                   String publicationUrl, String externalWorkId) { }
     public record ErrorView(String code) { }
     public record StageErrorView(String code, String failedNode) { }
 }

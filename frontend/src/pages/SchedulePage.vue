@@ -4,12 +4,14 @@ import { HttpError, postJsonWithCsrf, putJsonWithCsrf, request } from '../api/ht
 
 interface Account { id: string; name: string; columns: string[]; weeklyTarget: number }
 interface Material { id: string; title: string; accountIds: string[] }
-interface Item { id: string; column: string; scheduledDate: string; topicId: string | null; scriptId: string | null; version: number }
+interface Item { id: string; column: string; scheduledDate: string; topicId: string | null; scriptId: string | null;
+  version: number; publicationUrl: string | null; externalWorkId: string | null; publishedAt: string | null }
 interface Week { id: string; accountId: string; weekStart: string; items: Item[] }
 interface Batch { id: string; accountId: string; items: { column: string; topicId: string; scriptId: string }[] }
 interface Script { id: string; topicId: string; status: string; version: number;
   script: { spokenText: string; shootingNotes: string; sourceIds: string[] } }
-interface Edit { scheduledDate: string; column: string; spokenText: string; shootingNotes: string }
+interface Edit { scheduledDate: string; column: string; spokenText: string; shootingNotes: string;
+  publicationUrl: string; externalWorkId: string }
 
 function mondayInShanghai(): string {
   const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric',
@@ -42,6 +44,7 @@ const hasUnsaved = computed(() => week.value?.items.some(item => {
   const edit = edits.value[item.id]
   const script = item.scriptId ? scripts.value[item.scriptId] : undefined
   return edit && (edit.scheduledDate !== item.scheduledDate || edit.column !== item.column
+    || edit.publicationUrl !== (item.publicationUrl ?? '') || edit.externalWorkId !== (item.externalWorkId ?? '')
     || (script && (edit.spokenText !== script.script.spokenText || edit.shootingNotes !== script.script.shootingNotes)))
 }) ?? false)
 
@@ -61,6 +64,9 @@ function validItem(value: unknown): value is Item {
     && typeof value.scheduledDate === 'string' && 'version' in value && typeof value.version === 'number'
     && 'topicId' in value && (value.topicId === null || typeof value.topicId === 'string')
     && 'scriptId' in value && (value.scriptId === null || typeof value.scriptId === 'string')
+    && 'publicationUrl' in value && (value.publicationUrl === null || typeof value.publicationUrl === 'string')
+    && 'externalWorkId' in value && (value.externalWorkId === null || typeof value.externalWorkId === 'string')
+    && 'publishedAt' in value && (value.publishedAt === null || typeof value.publishedAt === 'string')
 }
 function validWeek(value: unknown): value is Week {
   return typeof value === 'object' && value !== null && 'id' in value && typeof value.id === 'string'
@@ -87,7 +93,8 @@ function resetEdits() {
   for (const item of week.value?.items ?? []) {
     const script = item.scriptId ? scripts.value[item.scriptId] : undefined
     next[item.id] = { scheduledDate: item.scheduledDate, column: item.column,
-      spokenText: script?.script.spokenText ?? '', shootingNotes: script?.script.shootingNotes ?? '' }
+      spokenText: script?.script.spokenText ?? '', shootingNotes: script?.script.shootingNotes ?? '',
+      publicationUrl: item.publicationUrl ?? '', externalWorkId: item.externalWorkId ?? '' }
   }
   edits.value = next
 }
@@ -156,7 +163,10 @@ function message(cause: unknown) {
   return ({ VERSION_CONFLICT: '内容已有新版本，请重新加载后核对。', SCRIPT_CONFIRMED: '脚本已确认，请先重新开放编辑。',
     INVALID_WEEK_PLAN: '整周草稿与当前排期的栏目或条数不一致。', PLAN_ITEM_OCCUPIED: '计划项已有草稿，不能覆盖。',
     INVALID_SCHEDULE_DATE: '发布日期须在当前周内。', MODEL_TIMEOUT: '生成超时，请稍后重试。',
-    INSUFFICIENT_MATERIAL: '参考资料不足，请先补充资料。', MATERIAL_NOT_FOUND: '所选资料已不可用。' }[cause.code ?? '']) ?? '保存失败，请稍后重试。'
+    INSUFFICIENT_MATERIAL: '参考资料不足，请先补充资料。', MATERIAL_NOT_FOUND: '所选资料已不可用。',
+    SCRIPT_NOT_CONFIRMED: '先确认脚本，才能记录发布作品。',
+    SCRIPT_ALREADY_PUBLISHED: '请先取消发布标记，再重新编辑脚本。',
+    INVALID_PUBLICATION: '请填写有效的作品链接或作品 ID。' }[cause.code ?? '']) ?? '保存失败，请稍后重试。'
 }
 function replaceItem(updated: Item) {
   if (week.value) week.value = { ...week.value,
@@ -261,6 +271,22 @@ async function regenerate(item: Item) {
   } catch (cause) { error.value = saved ? '内容已重做，但新脚本暂时无法读取，请刷新页面。' : message(cause) }
   finally { pending.value = false }
 }
+async function savePublication(item: Item, published: boolean) {
+  const edit = edits.value[item.id]
+  if (pending.value || !edit) return
+  pending.value = true; error.value = ''
+  try {
+    const result = await putJsonWithCsrf(`/api/schedules/items/${item.id}/publication`,
+      { expectedVersion: item.version, published, publicationUrl: edit.publicationUrl.trim(),
+        externalWorkId: edit.externalWorkId.trim() })
+    if (!validItem(result)) throw new Error('Invalid item')
+    replaceItem(result)
+    edits.value[item.id] = { ...edit, publicationUrl: result.publicationUrl ?? '',
+      externalWorkId: result.externalWorkId ?? '' }
+    notice.value = published ? '发布记录已保存。' : '已恢复为未发布。'
+  } catch (cause) { error.value = message(cause) }
+  finally { pending.value = false }
+}
 
 watch([accountId, weekStart], loadWeek)
 onMounted(() => { loadAccounts(); loadMaterials() })
@@ -321,7 +347,8 @@ onMounted(() => { loadAccounts(); loadMaterials() })
               :disabled="pending || !scriptChanged(item) || !edits[item.id].spokenText.trim() || !edits[item.id].shootingNotes.trim()" @click="saveScript(item)">保存脚本</button>
             <button v-if="scripts[item.scriptId].status !== 'CONFIRMED'" type="button" data-action="confirm-script"
               :disabled="pending || hasUnsaved" @click="changeScriptStatus(item, 'confirm')">确认脚本</button>
-            <button v-else type="button" :disabled="pending || hasUnsaved" @click="changeScriptStatus(item, 'reopen')">重新编辑</button>
+            <button v-else type="button" :disabled="pending || hasUnsaved || !!item.publishedAt"
+              @click="changeScriptStatus(item, 'reopen')">重新编辑</button>
           </div>
         </template>
         <div v-if="redo[item.id]" class="redo-fields">
@@ -337,6 +364,24 @@ onMounted(() => { loadAccounts(); loadMaterials() })
           <button type="button" data-action="regenerate" :disabled="pending || hasUnsaved || !redo[item.id].instruction.trim()
             || !redo[item.id].materialId || scripts[item.scriptId ?? '']?.status === 'CONFIRMED'"
             @click="regenerate(item)">重新生成这一条</button>
+        </div>
+        <div class="publication-fields">
+          <p>{{ item.publishedAt ? '已发布 · 手动记录' : '未发布' }}</p>
+          <label :for="`schedule-publication-url-${item.id}`">作品链接</label>
+          <input :id="`schedule-publication-url-${item.id}`" v-model="edits[item.id].publicationUrl"
+            type="url" :disabled="pending || !item.scriptId || scripts[item.scriptId]?.status !== 'CONFIRMED'" placeholder="https://..." />
+          <label :for="`schedule-work-id-${item.id}`">或作品 ID</label>
+          <input :id="`schedule-work-id-${item.id}`" v-model="edits[item.id].externalWorkId"
+            type="text" maxlength="128" :disabled="pending || !item.scriptId || scripts[item.scriptId]?.status !== 'CONFIRMED'" />
+          <button type="button" data-action="publish" :disabled="pending || !item.scriptId
+            || scripts[item.scriptId]?.status !== 'CONFIRMED'
+            || (!edits[item.id].publicationUrl.trim() && !edits[item.id].externalWorkId.trim())
+            || (!!item.publishedAt && edits[item.id].publicationUrl === (item.publicationUrl ?? '')
+              && edits[item.id].externalWorkId === (item.externalWorkId ?? ''))"
+            @click="savePublication(item, true)">{{ item.publishedAt ? '更新发布记录' : '标记已发布' }}</button>
+          <button v-if="item.publishedAt" type="button" data-action="unpublish" :disabled="pending"
+            @click="savePublication(item, false)">取消发布标记</button>
+          <a v-if="item.publicationUrl" :href="item.publicationUrl" target="_blank" rel="noopener noreferrer">打开已记录作品 ↗</a>
         </div>
       </article>
     </div>
@@ -355,7 +400,8 @@ p { color: #637166; font-size: 13px; line-height: 1.7; margin: 0; }
 .item-head span { color: #637166; font-size: 12px; }
 .item-field > input, .item-field > select { flex: 1; min-width: 0; }
 .item-actions { flex-wrap: wrap; }
-.redo-fields { display: grid; gap: 8px; border-top: 1px dashed #b7c1b4; padding-top: 12px; }
+.redo-fields, .publication-fields { display: grid; gap: 8px; border-top: 1px dashed #b7c1b4; padding-top: 12px; }
+.publication-fields a { color: #315f46; font-size: 12px; }
 label { color: #526252; font-size: 12px; }
 input, select, textarea { min-width: 0; width: 100%; border: 1px solid #b7c1b4; border-radius: 4px; padding: 9px; background: #fff; font: inherit; color: #263b32; }
 textarea { resize: vertical; }

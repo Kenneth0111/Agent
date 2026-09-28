@@ -66,6 +66,8 @@ npm --prefix frontend run dev
 
 整周生成请求 `POST /api/generations` 的 `WEEK_PLAN` 模式须附带 UUID `requestId`；同一用户使用相同标识及内容重试，会返回原生成运行而不再次调用模型；标识相同但内容不同返回 `REQUEST_ID_REUSED`。页面在网络失败后保留本次请求标识供重试，修改生成条件则换用新标识。`POST /api/schedules/items/{id}/regenerate` 接收 `expectedVersion`、`instruction`、`materialIds`，只为选中计划项生成新选题与脚本，并在版本一致时替换其引用；已确认脚本会在模型调用前被拒绝。其它计划项及旧草稿保留。
 
+发布记录由用户手动填写，不会调用抖音发布接口。`PUT /api/schedules/items/{id}/publication` 接收 `expectedVersion`、`published`、`publicationUrl`、`externalWorkId`；标记已发布时至少填写 HTTP(S) 作品链接或作品 ID，且关联脚本须已确认。已发布的脚本须先取消发布标记，才能重新开放编辑。取消标记会清除链接、作品 ID 和发布时间，但保留计划、选题与脚本引用。
+
 ```powershell
 mvn -f backend/pom.xml test
 mvn -f backend/pom.xml package

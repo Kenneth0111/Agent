@@ -70,6 +70,32 @@ class ScheduleServiceTest extends IntegrationTestSupport {
         assertThatThrownBy(() -> schedules.replaceDraft(owner, attached.items().get(1).id(), 2,
                 replacementTopic, replacementScript))
                 .isInstanceOf(ContentValidator.ContentInvalid.class).hasMessage("SCRIPT_CONFIRMED");
+        assertThatThrownBy(() -> schedules.setPublication(owner, replaced.id(), 3, true,
+                "https://www.douyin.com/video/123", null))
+                .isInstanceOf(ContentValidator.ContentInvalid.class).hasMessage("SCRIPT_NOT_CONFIRMED");
+        assertThatThrownBy(() -> schedules.setPublication(owner, attached.items().get(1).id(), 2,
+                true, null, null)).isInstanceOf(ContentValidator.ContentInvalid.class)
+                .hasMessage("INVALID_PUBLICATION");
+        assertThatThrownBy(() -> schedules.setPublication(owner, attached.items().get(1).id(), 2,
+                true, "javascript:alert(1)", null)).isInstanceOf(ContentValidator.ContentInvalid.class)
+                .hasMessage("INVALID_PUBLICATION");
+        var published = schedules.setPublication(owner, attached.items().get(1).id(), 2, true,
+                "https://www.douyin.com/video/123", "123");
+        assertThat(published.publishedAt()).isNotNull();
+        assertThat(published.publicationUrl()).isEqualTo("https://www.douyin.com/video/123");
+        assertThat(published.externalWorkId()).isEqualTo("123");
+        assertThat(published.scriptId()).isEqualTo(items.get(1).scriptId());
+        assertThatThrownBy(() -> content.reopenScript(owner, published.scriptId(), 2))
+                .isInstanceOf(ContentValidator.ContentInvalid.class).hasMessage("SCRIPT_ALREADY_PUBLISHED");
+        assertThatThrownBy(() -> schedules.setPublication(owner, published.id(), 2, false,
+                null, null)).isInstanceOf(ContentService.VersionConflict.class);
+        assertThatThrownBy(() -> schedules.setPublication(stranger, published.id(), 3, false,
+                null, null)).isInstanceOf(ContentValidator.ContentInvalid.class)
+                .hasMessage("PLAN_ITEM_NOT_FOUND");
+        var unpublished = schedules.setPublication(owner, published.id(), 3, false, null, null);
+        assertThat(unpublished.publishedAt()).isNull();
+        assertThat(unpublished.scriptId()).isEqualTo(items.get(1).scriptId());
+        assertThat(content.reopenScript(owner, unpublished.scriptId(), 2).status()).isEqualTo("DRAFT");
     }
 
     @Test

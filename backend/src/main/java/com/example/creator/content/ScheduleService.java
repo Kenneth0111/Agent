@@ -1,6 +1,7 @@
 package com.example.creator.content;
 
 import com.example.creator.agent.AccountProfiles;
+import java.net.URI;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.DayOfWeek;
@@ -72,7 +73,8 @@ public class ScheduleService {
                     """, (row, ignored) -> new Week(row.getString("id"), row.getString("account_id"),
                     row.getDate("week_start").toLocalDate(), List.of()), ownerId, weekId);
             var items = jdbc.query("""
-                    SELECT id, column_name, scheduled_date, topic_id, script_id, version
+                    SELECT id, column_name, scheduled_date, topic_id, script_id,
+                           publication_url, external_work_id, published_at, version
                     FROM content_schedule_items WHERE week_id = ? ORDER BY position
                     """, this::mapItem, weekId);
             return Optional.of(new Week(week.id(), week.accountId(), week.weekStart(), items));
@@ -97,7 +99,8 @@ public class ScheduleService {
                 """, date, itemId, expectedVersion);
         if (changed == 0) throw new ContentService.VersionConflict();
         return jdbc.queryForObject("""
-                SELECT id, column_name, scheduled_date, topic_id, script_id, version
+                SELECT id, column_name, scheduled_date, topic_id, script_id,
+                       publication_url, external_work_id, published_at, version
                 FROM content_schedule_items WHERE id = ?
                 """, this::mapItem, itemId);
     }
@@ -122,7 +125,8 @@ public class ScheduleService {
                 """, column, itemId, expectedVersion);
         if (changed == 0) throw new ContentService.VersionConflict();
         return jdbc.queryForObject("""
-                SELECT id, column_name, scheduled_date, topic_id, script_id, version
+                SELECT id, column_name, scheduled_date, topic_id, script_id,
+                       publication_url, external_work_id, published_at, version
                 FROM content_schedule_items WHERE id = ?
                 """, this::mapItem, itemId);
     }
@@ -161,7 +165,8 @@ public class ScheduleService {
     public Optional<Slot> slot(long ownerId, String itemId) {
         return jdbc.query("""
                 SELECT w.account_id, i.id, i.column_name, i.scheduled_date,
-                       i.topic_id, i.script_id, i.version
+                       i.topic_id, i.script_id, i.publication_url, i.external_work_id,
+                       i.published_at, i.version
                 FROM content_schedule_items i JOIN content_schedule_weeks w ON w.id = i.week_id
                 WHERE i.id = ? AND w.owner_id = ?
                 """, (row, ignored) -> new Slot(row.getString("account_id"), mapItem(row, ignored)),
@@ -172,7 +177,8 @@ public class ScheduleService {
     public Item replaceDraft(long ownerId, String itemId, int expectedVersion, String topicId, String scriptId) {
         var slots = jdbc.query("""
                 SELECT w.account_id, i.id, i.column_name, i.scheduled_date,
-                       i.topic_id, i.script_id, i.version
+                       i.topic_id, i.script_id, i.publication_url, i.external_work_id,
+                       i.published_at, i.version
                 FROM content_schedule_items i JOIN content_schedule_weeks w ON w.id = i.week_id
                 WHERE i.id = ? AND w.owner_id = ? FOR UPDATE
                 """, (row, ignored) -> new Slot(row.getString("account_id"), mapItem(row, ignored)),
@@ -202,10 +208,57 @@ public class ScheduleService {
         return slot(ownerId, itemId).orElseThrow().item();
     }
 
+    @Transactional
+    public Item setPublication(long ownerId, String itemId, int expectedVersion,
+                               boolean published, String url, String externalId) {
+        var slot = slot(ownerId, itemId)
+                .orElseThrow(() -> new ContentValidator.ContentInvalid("PLAN_ITEM_NOT_FOUND"));
+        if (slot.item().version() != expectedVersion) throw new ContentService.VersionConflict();
+        var cleanUrl = url == null || url.isBlank() ? null : url.strip();
+        var cleanId = externalId == null || externalId.isBlank() ? null : externalId.strip();
+        if (published) {
+            if ((cleanUrl == null && cleanId == null) || cleanUrl != null && !validPublicationUrl(cleanUrl)
+                    || cleanId != null && (cleanId.length() > 128 || !cleanId.matches("[A-Za-z0-9_-]+")))
+                throw new ContentValidator.ContentInvalid("INVALID_PUBLICATION");
+            if (slot.item().scriptId() == null) throw new ContentValidator.ContentInvalid("SCRIPT_NOT_CONFIRMED");
+            var status = jdbc.queryForObject("""
+                    SELECT status FROM content_scripts WHERE id = ? AND owner_id = ? FOR UPDATE
+                    """, String.class, slot.item().scriptId(), ownerId);
+            if (!"CONFIRMED".equals(status))
+                throw new ContentValidator.ContentInvalid("SCRIPT_NOT_CONFIRMED");
+        } else {
+            cleanUrl = null;
+            cleanId = null;
+        }
+        int changed = jdbc.update("""
+                UPDATE content_schedule_items
+                SET publication_url = ?, external_work_id = ?,
+                    published_at = CASE WHEN ? THEN COALESCE(published_at, CURRENT_TIMESTAMP(6)) ELSE NULL END,
+                    version = version + 1
+                WHERE id = ? AND version = ?
+                """, cleanUrl, cleanId, published, itemId, expectedVersion);
+        if (changed == 0) throw new ContentService.VersionConflict();
+        return slot(ownerId, itemId).orElseThrow().item();
+    }
+
+    private boolean validPublicationUrl(String url) {
+        if (url.length() > 2048) return false;
+        try {
+            var value = URI.create(url);
+            return ("https".equalsIgnoreCase(value.getScheme()) || "http".equalsIgnoreCase(value.getScheme()))
+                    && value.getHost() != null && value.getUserInfo() == null;
+        } catch (IllegalArgumentException invalid) {
+            return false;
+        }
+    }
+
     private Item mapItem(ResultSet row, int ignored) throws SQLException {
+        var publishedAt = row.getTimestamp("published_at");
         return new Item(row.getString("id"), row.getString("column_name"),
                 row.getDate("scheduled_date").toLocalDate(), row.getString("topic_id"),
-                row.getString("script_id"), row.getInt("version"));
+                row.getString("script_id"), row.getInt("version"),
+                row.getString("publication_url"), row.getString("external_work_id"),
+                publishedAt == null ? null : publishedAt.toInstant().toString());
     }
 
     private record ItemColumn(String accountId, String topicId, String scriptId, int version) { }
@@ -224,5 +277,11 @@ public class ScheduleService {
     public record Week(String id, String accountId, LocalDate weekStart, List<Item> items) { }
     public record Slot(String accountId, Item item) { }
     public record Item(String id, String column, LocalDate scheduledDate, String topicId,
-                       String scriptId, int version) { }
+                       String scriptId, int version, String publicationUrl,
+                       String externalWorkId, String publishedAt) {
+        public Item(String id, String column, LocalDate scheduledDate, String topicId,
+                    String scriptId, int version) {
+            this(id, column, scheduledDate, topicId, scriptId, version, null, null, null);
+        }
+    }
 }

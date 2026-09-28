@@ -143,11 +143,20 @@ public class ContentService {
 
     private SavedScript changeScriptStatus(long ownerId, String scriptId, int expectedVersion,
                                           String from, String to) {
+        var locked = jdbc.query("SELECT version FROM content_scripts WHERE owner_id = ? AND id = ? FOR UPDATE",
+                (row, ignored) -> row.getInt("version"), ownerId, scriptId);
+        if (locked.isEmpty()) throw new ContentValidator.ContentInvalid("SCRIPT_NOT_FOUND");
         var current = findScript(ownerId, scriptId)
                 .orElseThrow(() -> new ContentValidator.ContentInvalid("SCRIPT_NOT_FOUND"));
         if (current.version() != expectedVersion) throw new VersionConflict();
         if (!current.status().equals(from))
             throw new ContentValidator.ContentInvalid("INVALID_SCRIPT_STATUS");
+        if ("DRAFT".equals(to) && Boolean.TRUE.equals(jdbc.queryForObject("""
+                SELECT EXISTS(SELECT 1 FROM content_schedule_items i
+                JOIN content_schedule_weeks w ON w.id = i.week_id
+                WHERE i.script_id = ? AND w.owner_id = ? AND i.published_at IS NOT NULL)
+                """, Boolean.class, scriptId, ownerId)))
+            throw new ContentValidator.ContentInvalid("SCRIPT_ALREADY_PUBLISHED");
         int changed = jdbc.update("""
                 UPDATE content_scripts SET status = ?, version = version + 1
                 WHERE owner_id = ? AND id = ? AND version = ? AND status = ?

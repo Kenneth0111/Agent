@@ -10,7 +10,8 @@ const monday = '2026-09-28'
 const script = { id: 'script-1', topicId: 'topic-1', status: 'DRAFT', version: 1,
   script: { spokenText: '旧口播稿', shootingNotes: '录屏', sourceIds: ['material-1'] } }
 const week = { id: 'week-1', accountId: 'account-1', weekStart: monday, items: [
-  { id: 'item-1', column: 'Java 面试', scheduledDate: monday, topicId: 'topic-1', scriptId: 'script-1', version: 1 },
+  { id: 'item-1', column: 'Java 面试', scheduledDate: monday, topicId: 'topic-1', scriptId: 'script-1',
+    version: 1, publicationUrl: null, externalWorkId: null, publishedAt: null },
 ] }
 
 beforeEach(() => {
@@ -146,6 +147,33 @@ describe('weekly schedule page', () => {
     expect(vi.mocked(postJsonWithCsrf)).toHaveBeenCalledWith('/api/schedules/items/item-1/regenerate',
       { expectedVersion: 1, instruction: '换一道 Java 面试题', materialIds: ['material-1'] }, 180_000)
     expect((wrapper.get('#schedule-script-item-1').element as HTMLTextAreaElement).value).toBe('替换口播稿')
+    wrapper.unmount()
+  })
+
+  it('records a published work only after script confirmation', async () => {
+    vi.mocked(request).mockImplementation(async path => {
+      if (path === '/api/accounts') return [account]
+      if (path === '/api/materials') return []
+      if (path.startsWith('/api/generations/week-plans?')) return []
+      if (path.startsWith('/api/schedules/weeks?')) return week
+      if (path === '/api/generations/scripts/script-1') return { ...script, status: 'CONFIRMED' }
+      throw new Error(`Unexpected path ${path}`)
+    })
+    vi.mocked(putJsonWithCsrf).mockResolvedValue({ ...week.items[0], version: 2,
+      publicationUrl: 'https://www.douyin.com/video/123', externalWorkId: null,
+      publishedAt: '2026-09-28T05:00:00Z' })
+    const wrapper = mount(SchedulePage)
+    await flushPromises()
+    expect(wrapper.text()).toContain('未发布')
+    await wrapper.get('#schedule-publication-url-item-1').setValue('https://www.douyin.com/video/123')
+    await wrapper.get('[data-action="publish"]').trigger('click')
+    await flushPromises()
+    expect(vi.mocked(putJsonWithCsrf)).toHaveBeenCalledWith('/api/schedules/items/item-1/publication',
+      { expectedVersion: 1, published: true, publicationUrl: 'https://www.douyin.com/video/123',
+        externalWorkId: '' })
+    expect(wrapper.text()).toContain('已发布 · 手动记录')
+    expect(wrapper.get('.publication-fields a').attributes('href')).toBe('https://www.douyin.com/video/123')
+    expect(wrapper.findAll('button').find(button => button.text() === '重新编辑')!.attributes('disabled')).toBeDefined()
     wrapper.unmount()
   })
 })
