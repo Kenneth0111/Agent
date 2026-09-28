@@ -15,6 +15,7 @@ import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.request.ResponseFormat;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import java.net.SocketTimeoutException;
+import java.net.ConnectException;
 import java.net.http.HttpTimeoutException;
 import java.util.ArrayList;
 import java.util.List;
@@ -120,13 +121,21 @@ public class ModelGateway {
         if (model == null) throw new ModelFailure("MODEL_NOT_CONFIGURED");
         long started = System.nanoTime();
         ChatResponse response;
-        try {
-            response = model.chat(request);
-        } catch (RuntimeException failure) {
-            var code = failureCode(failure);
-            log.warn("model call {} failed: code={} type={} durationMs={}", operation, code,
-                    failure.getClass().getSimpleName(), elapsedMillis(started));
-            throw new ModelFailure(code);
+        for (int attempt = 0; ; attempt++) {
+            try {
+                response = model.chat(request);
+                break;
+            } catch (RuntimeException failure) {
+                if (attempt == 0 && !(failure instanceof AuthenticationException)
+                        && isConnectionFailure(failure)) {
+                    log.warn("model call {} connection failed before response; retrying once", operation);
+                    continue;
+                }
+                var code = failureCode(failure);
+                log.warn("model call {} failed: code={} type={} durationMs={}", operation, code,
+                        failure.getClass().getSimpleName(), elapsedMillis(started));
+                throw new ModelFailure(code);
+            }
         }
         var usage = response.tokenUsage();
         log.info("model call {} succeeded: durationMs={} inputTokens={} outputTokens={}", operation,
@@ -150,6 +159,13 @@ public class ModelGateway {
                     || cause instanceof SocketTimeoutException) return "MODEL_TIMEOUT";
         }
         return "MODEL_UPSTREAM_FAILED";
+    }
+
+    private static boolean isConnectionFailure(Throwable failure) {
+        for (var cause = failure; cause != null; cause = cause.getCause()) {
+            if (cause instanceof ConnectException) return true;
+        }
+        return false;
     }
 
     private static long elapsedMillis(long startedNanos) {

@@ -8,7 +8,9 @@ import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -21,6 +23,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.reset;
 
 @SpringBootTest(properties = "DEV_USER_PASSWORD=development-fixture-only")
 @ActiveProfiles("dev")
@@ -30,7 +33,13 @@ class GenerationJobsServiceTest extends IntegrationTestSupport {
     @Autowired private ContentService content;
     @Autowired private GenerationJobsService jobs;
     @Autowired private GenerationJobScanner scanner;
+    @Autowired private GenerationJobRecovery recovery;
     @MockitoBean private GenerationService generation;
+
+    @BeforeEach
+    void resetGenerator() {
+        reset(generation);
+    }
 
     @Test
     void manualAndScheduledTriggersShareTheGeneratorAndKeepOwnerAndSource() {
@@ -66,6 +75,10 @@ class GenerationJobsServiceTest extends IntegrationTestSupport {
         assertThat(manual.status()).isEqualTo("SUCCEEDED");
         assertThat(scheduled.status()).isEqualTo("SUCCEEDED");
         assertThat(manual.generationRunId()).isEqualTo(run.id());
+        assertThat(jdbc.queryForObject("""
+                SELECT JSON_UNQUOTE(JSON_EXTRACT(request_json, '$.instruction'))
+                FROM generation_job_triggers WHERE id = ?
+                """, String.class, manual.id())).isEqualTo("准备下周内容");
         assertThat(jobs.triggers(owner, job.id())).hasSize(2);
         assertThatThrownBy(() -> jobs.trigger(stranger, job.id(), GenerationJobsService.TriggerSource.MANUAL))
                 .isInstanceOf(ContentValidator.ContentInvalid.class).hasMessage("JOB_NOT_FOUND");
@@ -124,5 +137,64 @@ class GenerationJobsServiceTest extends IntegrationTestSupport {
         }
         assertThat(jobs.triggers(owner, job.id())).hasSize(1);
         verify(generation, org.mockito.Mockito.times(1)).generate(eq(owner), any());
+    }
+
+    @Test
+    void recoveryLinksFinishedRunsAndFlagsUnknownPaidCalls() {
+        long owner = jdbc.queryForObject("SELECT id FROM users WHERE email = ?", Long.class,
+                "creator-a@example.test");
+        var account = accounts.create(owner, new AccountService.AccountInput("恢复测试账号", "程序员",
+                "Java 和英语", List.of("Java 面试", "英语跟读"), 3));
+        var slots = List.of(new GenerationService.WeekSlot("Java 面试", List.of("m-1"), "第一条"),
+                new GenerationService.WeekSlot("Java 面试", List.of("m-2"), "第二条"),
+                new GenerationService.WeekSlot("英语跟读", List.of("m-3"), "跟读"));
+        var job = jobs.save(owner, account.id(), new GenerationJobsService.JobInput(1,
+                LocalTime.of(9, 0), "Asia/Shanghai", false, "准备下周内容", slots));
+        var completed = content.startRun(owner, account.id(), "WEEK_PLAN");
+        content.finishRun(owner, completed.id(), "saved-batch", 6);
+        var completedRequest = UUID.randomUUID().toString();
+        jdbc.update("UPDATE generation_runs SET request_id = ? WHERE id = ?", completedRequest, completed.id());
+        var completedTrigger = UUID.randomUUID().toString();
+        jdbc.update("""
+                INSERT INTO generation_job_triggers (id, job_id, owner_id, account_id,
+                                                     trigger_source, status, request_id, run_key)
+                VALUES (?, ?, ?, ?, 'SCHEDULED', 'RUNNING', ?, ?)
+                """, completedTrigger, job.id(), owner, account.id(), completedRequest, "2026-09-14");
+
+        var unknown = content.startRun(owner, account.id(), "WEEK_PLAN");
+        var unknownRequest = UUID.randomUUID().toString();
+        jdbc.update("UPDATE generation_runs SET request_id = ? WHERE id = ?", unknownRequest, unknown.id());
+        var unknownTrigger = UUID.randomUUID().toString();
+        jdbc.update("""
+                INSERT INTO generation_job_triggers (id, job_id, owner_id, account_id,
+                                                     trigger_source, status, request_id, run_key)
+                VALUES (?, ?, ?, ?, 'SCHEDULED', 'RUNNING', ?, ?)
+                """, unknownTrigger, job.id(), owner, account.id(), unknownRequest, "2026-09-21");
+        var missingTrigger = UUID.randomUUID().toString();
+        jdbc.update("""
+                INSERT INTO generation_job_triggers (id, job_id, owner_id, account_id,
+                                                     trigger_source, status, request_id, run_key)
+                VALUES (?, ?, ?, ?, 'SCHEDULED', 'RUNNING', ?, ?)
+                """, missingTrigger, job.id(), owner, account.id(), UUID.randomUUID().toString(),
+                "2026-09-07");
+
+        recovery.reconcile();
+        var runs = jobs.triggers(owner, job.id());
+        assertThat(runs).anySatisfy(item -> {
+            assertThat(item.id()).isEqualTo(completedTrigger);
+            assertThat(item.status()).isEqualTo("SUCCEEDED");
+            assertThat(item.generationRunId()).isEqualTo(completed.id());
+        });
+        assertThat(runs).anySatisfy(item -> {
+            assertThat(item.id()).isEqualTo(unknownTrigger);
+            assertThat(item.status()).isEqualTo("NEEDS_REVIEW");
+            assertThat(item.errorCode()).isEqualTo("INTERRUPTED_UNKNOWN");
+        });
+        assertThat(runs).anySatisfy(item -> {
+            assertThat(item.id()).isEqualTo(missingTrigger);
+            assertThat(item.status()).isEqualTo("NEEDS_REVIEW");
+            assertThat(item.generationRunId()).isNull();
+        });
+        assertThat(content.findRun(owner, unknown.id()).orElseThrow().status()).isEqualTo("NEEDS_REVIEW");
     }
 }

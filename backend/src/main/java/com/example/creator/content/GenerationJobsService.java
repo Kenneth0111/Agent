@@ -110,19 +110,26 @@ public class GenerationJobsService {
     private Optional<TriggerRun> execute(long ownerId, Job job, TriggerSource source, String runKey) {
         var id = UUID.randomUUID().toString();
         var requestId = UUID.randomUUID().toString();
+        var request = new GenerationService.Request(job.accountId(), "WEEK_PLAN", null,
+                job.instruction(), null, null, job.slots(), requestId);
+        String requestJson;
+        try {
+            requestJson = json.writeValueAsString(request);
+        } catch (JsonProcessingException impossible) {
+            throw new IllegalStateException(impossible);
+        }
         try {
             jdbc.update("""
                 INSERT INTO generation_job_triggers (id, job_id, owner_id, account_id,
-                                                     trigger_source, status, request_id, run_key)
-                VALUES (?, ?, ?, ?, ?, 'RUNNING', ?, ?)
-                """, id, job.id(), ownerId, job.accountId(), source.name(), requestId, runKey);
+                                                     trigger_source, status, request_id, run_key, request_json)
+                VALUES (?, ?, ?, ?, ?, 'RUNNING', ?, ?, ?)
+                """, id, job.id(), ownerId, job.accountId(), source.name(), requestId, runKey,
+                    requestJson);
         } catch (DuplicateKeyException duplicate) {
             if (runKey == null) throw duplicate;
             return findScheduledTrigger(ownerId, job.id(), runKey);
         }
         try {
-            var request = new GenerationService.Request(job.accountId(), "WEEK_PLAN", null,
-                    job.instruction(), null, null, job.slots(), requestId);
             var run = generation.generate(ownerId, request);
             jdbc.update("""
                     UPDATE generation_job_triggers

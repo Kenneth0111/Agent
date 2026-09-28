@@ -127,7 +127,7 @@ V4/V4.1/V4.2/V4.3 迁移保存选题、脚本、生成运行、失败节点、�
 
 周生成任务配置由 `PUT /api/generation-jobs/accounts/{accountId}` 保存，每个用户的每个账号一份。请求包含 `dayOfWeek`（周一为 1）、`localTime`（如 `09:00`）、IANA `timeZone`（如 `Asia/Shanghai`）、`enabled`、`instruction` 和与整周生成相同的 3 个 `slots`。`GET /api/generation-jobs/accounts/{accountId}` 读取配置；`POST /api/generation-jobs/{id}/trigger` 手动触发，`GET /api/generation-jobs/{id}/triggers` 读取最近 50 条触发记录，记录所属账号、来源、状态与生成运行 ID。手动触发会调用付费模型；即使任务停用也可手动触发。
 
-后台扫描每分钟检查启用任务，以任务时区的星期和当地时间判断到期；到期当天稍晚启动也能领取。每账号每个当地周一日期只允许一个定时运行，数据库唯一键持久去重；Redisson 全局锁使同一时刻最多有一个任务触发付费生成，繁忙的手动触发返回 409。由于用量预算尚未接入，`GENERATION_JOBS_SCHEDULER_ENABLED` 默认 `false`，保存配置不会自行产生付费调用；设置为 `true` 并重启后端才启用自动扫描。失败恢复与费用保护仍在开发中。
+后台扫描每分钟检查启用任务，以任务时区的星期和当地时间判断到期；到期当天稍晚启动也能领取。每账号每个当地周一日期只允许一个定时运行，数据库唯一键持久去重；Redisson 全局锁使同一时刻最多有一个任务触发付费生成，繁忙的手动触发返回 409。由于用量预算尚未接入，`GENERATION_JOBS_SCHEDULER_ENABLED` 默认 `false`，保存配置不会自行产生付费调用；设置为 `true` 并重启后端才启用自动扫描。每次触发保存生成请求快照，启动时核对遗留的 `RUNNING` 记录：已完成的生成运行会补回结果，无法判断模型调用结果的记录转为 `NEEDS_REVIEW`，不会自动重试。模型建立连接失败只自动重试一次；超时、鉴权和 HTTP 错误不会自动重试。图节点级 checkpoint 和人工处理页面尚未实现。
 
 `POST /api/generations/scripts/{id}/revise` 接收 `expectedVersion`、`instruction` 和可选的 `conversationId`，返回新版本与会话 ID；同一会话的最近 3 条修改要求进入模型上下文。旧版本在 `GET /api/generations/scripts/{id}/versions` 可查，来源 ID 必须保留；旧版本号写入返回 409。所有读写从登录态限定用户，跨用户脚本或会话不会进入模型上下文。内容生成和修改会真实调用模型，请先在 `.env` 设置 DeepSeek API Key。
 
