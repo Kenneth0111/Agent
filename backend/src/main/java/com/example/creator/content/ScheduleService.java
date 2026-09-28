@@ -19,10 +19,12 @@ import org.springframework.transaction.annotation.Transactional;
 public class ScheduleService {
     private final JdbcTemplate jdbc;
     private final AccountProfiles accounts;
+    private final ContentService content;
 
-    ScheduleService(JdbcTemplate jdbc, AccountProfiles accounts) {
+    ScheduleService(JdbcTemplate jdbc, AccountProfiles accounts, ContentService content) {
         this.jdbc = jdbc;
         this.accounts = accounts;
+        this.content = content;
     }
 
     @Transactional
@@ -100,11 +102,69 @@ public class ScheduleService {
                 """, this::mapItem, itemId);
     }
 
+    @Transactional
+    public Item changeColumn(long ownerId, String itemId, int expectedVersion, String column) {
+        var matches = jdbc.query("""
+                SELECT w.account_id, i.topic_id, i.script_id, i.version FROM content_schedule_items i
+                JOIN content_schedule_weeks w ON w.id = i.week_id WHERE i.id = ? AND w.owner_id = ?
+                """, (row, ignored) -> new ItemColumn(row.getString("account_id"), row.getString("topic_id"),
+                row.getString("script_id"), row.getInt("version")), itemId, ownerId);
+        if (matches.isEmpty()) throw new ContentValidator.ContentInvalid("PLAN_ITEM_NOT_FOUND");
+        var current = matches.getFirst();
+        if (current.version() != expectedVersion) throw new ContentService.VersionConflict();
+        if (current.topicId() != null || current.scriptId() != null)
+            throw new ContentValidator.ContentInvalid("PLAN_ITEM_OCCUPIED");
+        if (column == null || !accounts.find(ownerId, current.accountId()).orElseThrow().columns().contains(column))
+            throw new ContentValidator.ContentInvalid("INVALID_COLUMN");
+        int changed = jdbc.update("""
+                UPDATE content_schedule_items SET column_name = ?, version = version + 1
+                WHERE id = ? AND version = ? AND topic_id IS NULL AND script_id IS NULL
+                """, column, itemId, expectedVersion);
+        if (changed == 0) throw new ContentService.VersionConflict();
+        return jdbc.queryForObject("""
+                SELECT id, column_name, scheduled_date, topic_id, script_id, version
+                FROM content_schedule_items WHERE id = ?
+                """, this::mapItem, itemId);
+    }
+
+    @Transactional
+    public Week attachBatch(long ownerId, String weekId, String batchId) {
+        var week = find(ownerId, weekId).orElseThrow(() -> new ContentValidator.ContentInvalid("PLAN_NOT_FOUND"));
+        var batch = content.findWeekPlan(ownerId, batchId)
+                .filter(found -> found.accountId().equals(week.accountId()))
+                .orElseThrow(() -> new ContentValidator.ContentInvalid("WEEK_PLAN_NOT_FOUND"));
+        if (week.items().size() != batch.items().size())
+            throw new ContentValidator.ContentInvalid("INVALID_WEEK_PLAN");
+        for (int i = 0; i < week.items().size(); i++) {
+            var item = week.items().get(i);
+            var draft = batch.items().get(i);
+            if (!item.column().equals(draft.column()))
+                throw new ContentValidator.ContentInvalid("INVALID_WEEK_PLAN");
+            if (item.topicId() != null || item.scriptId() != null) {
+                if (!draft.topicId().equals(item.topicId()) || !draft.scriptId().equals(item.scriptId()))
+                    throw new ContentValidator.ContentInvalid("PLAN_ITEM_OCCUPIED");
+            }
+        }
+        for (int i = 0; i < week.items().size(); i++) {
+            var item = week.items().get(i);
+            if (item.scriptId() != null) continue;
+            var draft = batch.items().get(i);
+            int changed = jdbc.update("""
+                    UPDATE content_schedule_items SET topic_id = ?, script_id = ?, version = version + 1
+                    WHERE id = ? AND version = ? AND topic_id IS NULL AND script_id IS NULL
+                    """, draft.topicId(), draft.scriptId(), item.id(), item.version());
+            if (changed == 0) throw new ContentService.VersionConflict();
+        }
+        return find(ownerId, weekId).orElseThrow();
+    }
+
     private Item mapItem(ResultSet row, int ignored) throws SQLException {
         return new Item(row.getString("id"), row.getString("column_name"),
                 row.getDate("scheduled_date").toLocalDate(), row.getString("topic_id"),
                 row.getString("script_id"), row.getInt("version"));
     }
+
+    private record ItemColumn(String accountId, String topicId, String scriptId, int version) { }
 
     private List<String> columns(List<String> configured, int target) {
         var slots = new ArrayList<String>(target);

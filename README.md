@@ -2,7 +2,7 @@
 
 一个逐步开发中的 Java 内容创作与运营 Agent。目标是支持资料检索、选题、脚本、周排期及基于真实数据的复盘。
 
-当前已支持邀请注册、登录、按用户隔离的内容账号与资料、个人资料优先检索、Java 面试及英语跟读选题/脚本生成、整周草稿和定向修改。开发环境已用 DeepSeek 完成真实内容联调。抖音指标接入、周日历及自动运行仍在后续计划中。
+当前已支持邀请注册、登录、按用户隔离的内容账号与资料、个人资料优先检索、Java 面试及英语跟读选题/脚本生成、整周草稿、定向修改和周计划排期。开发环境已用 DeepSeek 完成真实内容联调。抖音指标接入及自动运行仍在后续计划中。
 
 ## 本地环境
 
@@ -58,9 +58,11 @@ npm --prefix frontend run dev
 
 ## 验证
 
-周排期接口：`POST /api/schedules/weeks` 接收 `accountId` 与周一日期 `weekStart`（`YYYY-MM-DD`），为账号创建该周排期；同一账号同一周再次提交返回原排期。`GET /api/schedules/weeks?accountId=...&weekStart=...` 读取该周，`PUT /api/schedules/items/{id}/date` 接收 `expectedVersion` 与 `scheduledDate` 修改发布日期。日期按 `Asia/Shanghai` 的本地日历解释，只能落在所属周；版本冲突返回 409。初始计划项预留选题与脚本引用，新建时为空，后续生成流程负责关联。
+周排期接口：`POST /api/schedules/weeks` 接收 `accountId` 与周一日期 `weekStart`（`YYYY-MM-DD`），为账号创建该周排期；同一账号同一周再次提交返回原排期。`GET /api/schedules/weeks?accountId=...&weekStart=...` 读取该周。`PUT /api/schedules/items/{id}/date` 接收 `expectedVersion` 与 `scheduledDate` 修改发布日期；`PUT /api/schedules/items/{id}/column` 接收 `expectedVersion` 与 `column` 修改尚未关联草稿的栏目。日期按 `Asia/Shanghai` 的本地日历解释，只能落在所属周；版本冲突返回 409。`POST /api/schedules/weeks/{id}/attach-batch` 接收 `batchId`，把同账号、条数与栏目一致的整周草稿关联到空计划项；相同批次重复关联不会重复写入，也不会覆盖其他草稿。
 
 脚本确认接口：`POST /api/generations/scripts/{id}/confirm` 接收 `expectedVersion`，将待审阅草稿标为 `CONFIRMED`；`POST /api/generations/scripts/{id}/reopen` 用相同字段显式重新开放编辑。两种操作都会递增版本，旧版本返回 409；确认后的修改请求在调用模型前被拒绝。再次生成脚本会保存新的候选稿，不覆盖已有确认稿。
+
+周计划页面可按账号和周查看计划项，关联整周草稿，修改日期、栏目和脚本，并确认或重新开放脚本。`PUT /api/generations/scripts/{id}` 接收 `expectedVersion`、`spokenText`、`shootingNotes` 保存人工修改，保留原始资料引用及版本历史；已确认脚本须先重新开放。页面在切换账号或周次前提示未保存修改。
 
 ```powershell
 mvn -f backend/pom.xml test

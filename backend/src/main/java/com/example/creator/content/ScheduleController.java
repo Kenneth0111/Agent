@@ -56,13 +56,43 @@ public class ScheduleController {
         }
     }
 
+    @PutMapping("/items/{id}/column")
+    public ResponseEntity<?> column(@PathVariable String id, @RequestBody(required = false) ColumnInput input) {
+        if (input == null || input.expectedVersion() < 1)
+            return ResponseEntity.badRequest().body(new ErrorView("INVALID_COLUMN"));
+        try {
+            return ResponseEntity.ok(schedules.changeColumn(currentUser.id(), id, input.expectedVersion(),
+                    input.column()));
+        } catch (ContentService.VersionConflict conflict) {
+            return ResponseEntity.status(409).body(new ErrorView("VERSION_CONFLICT"));
+        } catch (ContentValidator.ContentInvalid invalid) {
+            return failure(invalid);
+        }
+    }
+
+    @PostMapping("/weeks/{id}/attach-batch")
+    public ResponseEntity<?> attach(@PathVariable String id, @RequestBody(required = false) BatchInput input) {
+        if (input == null || input.batchId() == null || input.batchId().isBlank())
+            return ResponseEntity.badRequest().body(new ErrorView("WEEK_PLAN_NOT_FOUND"));
+        try {
+            return ResponseEntity.ok(schedules.attachBatch(currentUser.id(), id, input.batchId()));
+        } catch (ContentService.VersionConflict conflict) {
+            return ResponseEntity.status(409).body(new ErrorView("VERSION_CONFLICT"));
+        } catch (ContentValidator.ContentInvalid invalid) {
+            return failure(invalid);
+        }
+    }
+
     private ResponseEntity<ErrorView> failure(ContentValidator.ContentInvalid invalid) {
         var code = invalid.getMessage();
         return ResponseEntity.status("ACCOUNT_NOT_FOUND".equals(code) || "PLAN_ITEM_NOT_FOUND".equals(code)
-                ? 404 : 400).body(new ErrorView(code));
+                || "PLAN_NOT_FOUND".equals(code) || "WEEK_PLAN_NOT_FOUND".equals(code)
+                ? 404 : "PLAN_ITEM_OCCUPIED".equals(code) ? 409 : 400).body(new ErrorView(code));
     }
 
     public record WeekInput(String accountId, LocalDate weekStart) { }
     public record DateInput(int expectedVersion, LocalDate scheduledDate) { }
+    public record ColumnInput(int expectedVersion, String column) { }
+    public record BatchInput(String batchId) { }
     public record ErrorView(String code) { }
 }

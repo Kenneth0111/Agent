@@ -4,6 +4,7 @@ import com.example.creator.IntegrationTestSupport;
 import com.example.creator.account.AccountService;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -19,6 +20,37 @@ class ScheduleServiceTest extends IntegrationTestSupport {
     @Autowired private JdbcTemplate jdbc;
     @Autowired private AccountService accounts;
     @Autowired private ScheduleService schedules;
+    @Autowired private ContentService content;
+
+    @Test
+    void attachesOneOwnedDraftBatchWithoutReplacingAssignedItems() {
+        long owner = jdbc.queryForObject("SELECT id FROM users WHERE email = ?", Long.class,
+                "creator-a@example.test");
+        long stranger = jdbc.queryForObject("SELECT id FROM users WHERE email = ?", Long.class,
+                "creator-b@example.test");
+        var account = accounts.create(owner, new AccountService.AccountInput("绑定草稿", "程序员",
+                "Java 和英语", List.of("Java 面试", "英语跟读"), 3));
+        var week = schedules.create(owner, account.id(), LocalDate.of(2026, 10, 5));
+        var items = new java.util.ArrayList<ContentService.WeekItem>();
+        for (int i = 0; i < 3; i++) {
+            var column = i == 2 ? "英语跟读" : "Java 面试";
+            var topicId = content.saveTopic(owner, account.id(), new ContentValidator.Topic(column,
+                    "选题" + i, "程序员", "角度", "开头", "提纲", List.of("m-1"), "资料"), Set.of("m-1"));
+            var scriptId = content.saveScript(owner, topicId,
+                    new ContentValidator.Script("脚本" + i, "录屏", List.of("m-1")), Set.of("m-1"));
+            items.add(new ContentService.WeekItem(column, topicId, scriptId));
+        }
+        var batchId = content.saveWeekPlan(owner, account.id(), items);
+        assertThatThrownBy(() -> schedules.attachBatch(stranger, week.id(), batchId))
+                .isInstanceOf(ContentValidator.ContentInvalid.class).hasMessage("PLAN_NOT_FOUND");
+
+        var attached = schedules.attachBatch(owner, week.id(), batchId);
+        assertThat(attached.items()).extracting(ScheduleService.Item::scriptId)
+                .containsExactlyElementsOf(items.stream().map(ContentService.WeekItem::scriptId).toList());
+        assertThat(schedules.attachBatch(owner, week.id(), batchId)).isEqualTo(attached);
+        assertThatThrownBy(() -> schedules.changeColumn(owner, attached.items().getFirst().id(), 2, "英语跟读"))
+                .isInstanceOf(ContentValidator.ContentInvalid.class).hasMessage("PLAN_ITEM_OCCUPIED");
+    }
 
     @Test
     void createsOwnedWeekWithConfiguredQuotaAndEditableDates() {
@@ -57,6 +89,9 @@ class ScheduleServiceTest extends IntegrationTestSupport {
         var next = schedules.create(owner, account.id(), monday.plusWeeks(1));
         assertThat(next.items()).hasSize(4).extracting(ScheduleService.Item::column)
                 .containsExactly("Java 面试", "Java 面试", "Java 面试", "英语跟读");
+        var changedColumn = schedules.changeColumn(owner, next.items().getFirst().id(), 1, "英语跟读");
+        assertThat(changedColumn.column()).isEqualTo("英语跟读");
+        assertThat(changedColumn.version()).isEqualTo(2);
         assertThat(schedules.find(owner, first.id())).get().extracting(ScheduleService.Week::items)
                 .asList().hasSize(3);
         assertThat(schedules.create(owner, account.id(), monday).id()).isEqualTo(first.id());

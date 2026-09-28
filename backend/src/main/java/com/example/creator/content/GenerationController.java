@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
@@ -123,6 +124,25 @@ public class GenerationController {
         return changeStatus(id, input, false);
     }
 
+    @PutMapping("/scripts/{id}")
+    public ResponseEntity<?> edit(@PathVariable String id, @RequestBody(required = false) EditInput input) {
+        if (input == null || input.expectedVersion() < 1)
+            return ResponseEntity.badRequest().body(new ErrorView("INVALID_REVISION"));
+        var original = content.findScript(currentUser.id(), id);
+        if (original.isEmpty()) return ResponseEntity.status(404).body(new ErrorView("SCRIPT_NOT_FOUND"));
+        try {
+            var script = new ContentValidator.Script(input.spokenText(), input.shootingNotes(),
+                    original.get().script().sourceIds());
+            return ResponseEntity.ok(content.reviseScript(currentUser.id(), id, input.expectedVersion(),
+                    original.get().conversationId(), "手动编辑", script));
+        } catch (ContentService.VersionConflict conflict) {
+            return ResponseEntity.status(409).body(new ErrorView("VERSION_CONFLICT"));
+        } catch (ContentValidator.ContentInvalid invalid) {
+            return ResponseEntity.status("SCRIPT_CONFIRMED".equals(invalid.getMessage()) ? 409 : 400)
+                    .body(new ErrorView(invalid.getMessage()));
+        }
+    }
+
     private ResponseEntity<?> changeStatus(String id, StatusInput input, boolean confirm) {
         if (input == null || input.expectedVersion() < 1)
             return ResponseEntity.badRequest().body(new ErrorView("INVALID_VERSION"));
@@ -139,5 +159,6 @@ public class GenerationController {
     }
 
     public record StatusInput(int expectedVersion) { }
+    public record EditInput(int expectedVersion, String spokenText, String shootingNotes) { }
     public record ErrorView(String code) { }
 }

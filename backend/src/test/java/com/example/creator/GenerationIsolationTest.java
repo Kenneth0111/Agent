@@ -57,6 +57,18 @@ class GenerationIsolationTest extends IntegrationTestSupport {
         assertThat(get(b, "/api/generations/scripts/" + scriptId + "/versions").statusCode()).isEqualTo(404);
         assertThat(post(b, "/api/generations/scripts/" + scriptId + "/revise",
                 "{\"expectedVersion\":1,\"instruction\":\"改口播\"}").statusCode()).isEqualTo(404);
+        var edit = "{\"expectedVersion\":1,\"spokenText\":\"更准确的口播稿\",\"shootingNotes\":\"录屏\"}";
+        assertThat(put(b, "/api/generations/scripts/" + scriptId, edit).statusCode()).isEqualTo(404);
+        var saved = put(a, "/api/generations/scripts/" + scriptId, edit);
+        assertThat(saved.statusCode()).isEqualTo(200);
+        assertThat(json.readTree(saved.body()).get("version").asInt()).isEqualTo(2);
+        assertThat(json.readTree(saved.body()).at("/script/sourceIds/0").asText()).isEqualTo("source-1");
+        assertThat(put(a, "/api/generations/scripts/" + scriptId, edit).statusCode()).isEqualTo(409);
+        assertThat(post(a, "/api/generations/scripts/" + scriptId + "/confirm",
+                "{\"expectedVersion\":2}").statusCode()).isEqualTo(200);
+        assertThat(put(a, "/api/generations/scripts/" + scriptId,
+                "{\"expectedVersion\":3,\"spokenText\":\"确认后禁止编辑\",\"shootingNotes\":\"录屏\"}")
+                .statusCode()).isEqualTo(409);
     }
 
     private HttpClient client() {
@@ -74,6 +86,13 @@ class GenerationIsolationTest extends IntegrationTestSupport {
         return client.send(HttpRequest.newBuilder(uri(path)).header("Content-Type", "application/json")
                 .header(csrf.get("headerName").asText(), csrf.get("token").asText())
                 .POST(HttpRequest.BodyPublishers.ofString(body)).build(), HttpResponse.BodyHandlers.ofString());
+    }
+
+    private HttpResponse<String> put(HttpClient client, String path, String body) throws Exception {
+        var csrf = json.readTree(get(client, "/api/auth/csrf").body());
+        return client.send(HttpRequest.newBuilder(uri(path)).header("Content-Type", "application/json")
+                .header(csrf.get("headerName").asText(), csrf.get("token").asText())
+                .PUT(HttpRequest.BodyPublishers.ofString(body)).build(), HttpResponse.BodyHandlers.ofString());
     }
 
     private void login(HttpClient client, String email) throws Exception {
