@@ -1,0 +1,84 @@
+package com.example.creator.content;
+
+import com.example.creator.IntegrationTestSupport;
+import com.example.creator.account.AccountService;
+import java.time.LocalTime;
+import java.util.List;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+@SpringBootTest(properties = "DEV_USER_PASSWORD=development-fixture-only")
+@ActiveProfiles("dev")
+class GenerationJobsServiceTest extends IntegrationTestSupport {
+    @Autowired private JdbcTemplate jdbc;
+    @Autowired private AccountService accounts;
+    @Autowired private ContentService content;
+    @Autowired private GenerationJobsService jobs;
+    @MockitoBean private GenerationService generation;
+
+    @Test
+    void manualAndScheduledTriggersShareTheGeneratorAndKeepOwnerAndSource() {
+        long owner = jdbc.queryForObject("SELECT id FROM users WHERE email = ?", Long.class,
+                "creator-a@example.test");
+        long stranger = jdbc.queryForObject("SELECT id FROM users WHERE email = ?", Long.class,
+                "creator-b@example.test");
+        var account = accounts.create(owner, new AccountService.AccountInput("周任务账号", "程序员",
+                "Java 和英语", List.of("Java 面试", "英语跟读"), 3));
+        var slots = List.of(new GenerationService.WeekSlot("Java 面试", List.of("m-1"), "第一条"),
+                new GenerationService.WeekSlot("Java 面试", List.of("m-2"), "第二条"),
+                new GenerationService.WeekSlot("英语跟读", List.of("m-3"), "跟读"));
+        var input = new GenerationJobsService.JobInput(1, LocalTime.of(9, 0), "Asia/Shanghai",
+                true, "准备下周内容", slots);
+        var job = jobs.save(owner, account.id(), input);
+        assertThat(job.enabled()).isTrue();
+        assertThat(jobs.find(owner, job.id())).contains(job);
+        assertThat(jobs.find(stranger, job.id())).isEmpty();
+        assertThatThrownBy(() -> jobs.save(stranger, account.id(), input))
+                .isInstanceOf(ContentValidator.ContentInvalid.class).hasMessage("ACCOUNT_NOT_FOUND");
+        assertThatThrownBy(() -> jobs.save(owner, account.id(),
+                new GenerationJobsService.JobInput(1, LocalTime.of(9, 0), "Bad/Zone",
+                        true, "准备下周内容", slots)))
+                .isInstanceOf(ContentValidator.ContentInvalid.class).hasMessage("INVALID_JOB");
+
+        var started = content.startRun(owner, account.id(), "WEEK_PLAN");
+        var run = content.finishRun(owner, started.id(), "week-batch-1", 6);
+        when(generation.generate(eq(owner), any())).thenReturn(run);
+        var manual = jobs.trigger(owner, job.id(), GenerationJobsService.TriggerSource.MANUAL);
+        var scheduled = jobs.trigger(owner, job.id(), GenerationJobsService.TriggerSource.SCHEDULED);
+        assertThat(manual.triggerSource()).isEqualTo("MANUAL");
+        assertThat(scheduled.triggerSource()).isEqualTo("SCHEDULED");
+        assertThat(manual.status()).isEqualTo("SUCCEEDED");
+        assertThat(scheduled.status()).isEqualTo("SUCCEEDED");
+        assertThat(manual.generationRunId()).isEqualTo(run.id());
+        assertThat(jobs.triggers(owner, job.id())).hasSize(2);
+        assertThatThrownBy(() -> jobs.trigger(stranger, job.id(), GenerationJobsService.TriggerSource.MANUAL))
+                .isInstanceOf(ContentValidator.ContentInvalid.class).hasMessage("JOB_NOT_FOUND");
+        var requests = org.mockito.ArgumentCaptor.forClass(GenerationService.Request.class);
+        verify(generation, org.mockito.Mockito.times(2)).generate(eq(owner), requests.capture());
+        assertThat(requests.getAllValues()).allSatisfy(request -> {
+            assertThat(request.mode()).isEqualTo("WEEK_PLAN");
+            assertThat(request.accountId()).isEqualTo(account.id());
+            assertThat(request.instruction()).isEqualTo("准备下周内容");
+            assertThat(request.slots()).isEqualTo(slots);
+        });
+        assertThat(requests.getAllValues().get(0).requestId())
+                .isNotEqualTo(requests.getAllValues().get(1).requestId());
+
+        var disabled = jobs.save(owner, account.id(), new GenerationJobsService.JobInput(1,
+                LocalTime.of(9, 0), "Asia/Shanghai", false, "准备下周内容", slots));
+        assertThat(disabled.id()).isEqualTo(job.id());
+        assertThatThrownBy(() -> jobs.trigger(owner, job.id(), GenerationJobsService.TriggerSource.SCHEDULED))
+                .isInstanceOf(ContentValidator.ContentInvalid.class).hasMessage("JOB_DISABLED");
+    }
+}

@@ -123,7 +123,9 @@ V4/V4.1/V4.2/V4.3 迁移保存选题、脚本、生成运行、失败节点、�
 
 登录后在“内容生成”选择账号、栏目和最多 3 份参考资料，输入要求并生成选题；选择已保存选题后可生成脚本。没有匹配资料时允许保存标注“待核实”的选题，但不能生成无依据的脚本。`POST /api/generations` 使用 `mode=TOPICS` 或 `SCRIPT`，返回运行记录；`GET /api/generations/{id}` 查询运行。`GET /api/generations/topics?accountId=...` 和 `GET /api/generations/scripts?topicId=...` 让刷新页面后仍能读取草稿。
 
-`POST /api/generations` 的 `mode=WEEK_PLAN` 接收固定 3 个 `slots`（前两条 `Java 面试`，第三条 `英语跟读`），每条指定参考 `materialIds`；成功后产生 3 组选题与脚本及一个整周草稿 ID。`GET /api/generations/week-plans?accountId=...` 与 `GET /api/generations/week-plans/{id}` 可读取。整周生成目前为同步串行调用；若中途失败，已完成的单条草稿仍保留，整周草稿不会保存，重试可能产生重复单条草稿。正式用于定时运行前需加入请求幂等和断点续跑。
+`POST /api/generations` 的 `mode=WEEK_PLAN` 接收固定 3 个 `slots`（前两条 `Java 面试`，第三条 `英语跟读`），每条指定参考 `materialIds`；成功后产生 3 组选题与脚本及一个整周草稿 ID。`GET /api/generations/week-plans?accountId=...` 与 `GET /api/generations/week-plans/{id}` 可读取。整周生成目前为同步串行调用；请求带 UUID `requestId` 时，同一用户、同一标识和相同内容的重复提交返回原运行，不再调用模型；同一标识配不同内容被拒绝。若中途失败，已完成的单条草稿仍保留，整周草稿不会保存；断点续跑尚未实现。
+
+周生成任务配置由 `PUT /api/generation-jobs/accounts/{accountId}` 保存，每个用户的每个账号一份。请求包含 `dayOfWeek`（周一为 1）、`localTime`（如 `09:00`）、IANA `timeZone`（如 `Asia/Shanghai`）、`enabled`、`instruction` 和与整周生成相同的 3 个 `slots`。`GET /api/generation-jobs/accounts/{accountId}` 读取配置；`POST /api/generation-jobs/{id}/trigger` 手动触发，`GET /api/generation-jobs/{id}/triggers` 读取最近 50 条触发记录，记录所属账号、来源、状态与生成运行 ID。手动触发会调用付费模型；即使任务停用也可手动触发。定时扫描、重复领取控制和失败恢复尚未启用，当前保存配置不会自行产生付费调用。
 
 `POST /api/generations/scripts/{id}/revise` 接收 `expectedVersion`、`instruction` 和可选的 `conversationId`，返回新版本与会话 ID；同一会话的最近 3 条修改要求进入模型上下文。旧版本在 `GET /api/generations/scripts/{id}/versions` 可查，来源 ID 必须保留；旧版本号写入返回 409。所有读写从登录态限定用户，跨用户脚本或会话不会进入模型上下文。内容生成和修改会真实调用模型，请先在 `.env` 设置 DeepSeek API Key。
 
