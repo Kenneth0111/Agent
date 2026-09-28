@@ -38,6 +38,8 @@ server:
         secure: ${SESSION_COOKIE_SECURE:false}
 
 creator:
+  jobs:
+    scheduler-enabled: ${GENERATION_JOBS_SCHEDULER_ENABLED:false}
   model:
     base-url: ${DEEPSEEK_BASE_URL:https://api.deepseek.com}
     api-key: ${DEEPSEEK_API_KEY:}

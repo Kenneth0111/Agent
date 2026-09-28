@@ -125,7 +125,9 @@ V4/V4.1/V4.2/V4.3 迁移保存选题、脚本、生成运行、失败节点、�
 
 `POST /api/generations` 的 `mode=WEEK_PLAN` 接收固定 3 个 `slots`（前两条 `Java 面试`，第三条 `英语跟读`），每条指定参考 `materialIds`；成功后产生 3 组选题与脚本及一个整周草稿 ID。`GET /api/generations/week-plans?accountId=...` 与 `GET /api/generations/week-plans/{id}` 可读取。整周生成目前为同步串行调用；请求带 UUID `requestId` 时，同一用户、同一标识和相同内容的重复提交返回原运行，不再调用模型；同一标识配不同内容被拒绝。若中途失败，已完成的单条草稿仍保留，整周草稿不会保存；断点续跑尚未实现。
 
-周生成任务配置由 `PUT /api/generation-jobs/accounts/{accountId}` 保存，每个用户的每个账号一份。请求包含 `dayOfWeek`（周一为 1）、`localTime`（如 `09:00`）、IANA `timeZone`（如 `Asia/Shanghai`）、`enabled`、`instruction` 和与整周生成相同的 3 个 `slots`。`GET /api/generation-jobs/accounts/{accountId}` 读取配置；`POST /api/generation-jobs/{id}/trigger` 手动触发，`GET /api/generation-jobs/{id}/triggers` 读取最近 50 条触发记录，记录所属账号、来源、状态与生成运行 ID。手动触发会调用付费模型；即使任务停用也可手动触发。定时扫描、重复领取控制和失败恢复尚未启用，当前保存配置不会自行产生付费调用。
+周生成任务配置由 `PUT /api/generation-jobs/accounts/{accountId}` 保存，每个用户的每个账号一份。请求包含 `dayOfWeek`（周一为 1）、`localTime`（如 `09:00`）、IANA `timeZone`（如 `Asia/Shanghai`）、`enabled`、`instruction` 和与整周生成相同的 3 个 `slots`。`GET /api/generation-jobs/accounts/{accountId}` 读取配置；`POST /api/generation-jobs/{id}/trigger` 手动触发，`GET /api/generation-jobs/{id}/triggers` 读取最近 50 条触发记录，记录所属账号、来源、状态与生成运行 ID。手动触发会调用付费模型；即使任务停用也可手动触发。
+
+后台扫描每分钟检查启用任务，以任务时区的星期和当地时间判断到期；到期当天稍晚启动也能领取。每账号每个当地周一日期只允许一个定时运行，数据库唯一键持久去重；Redisson 全局锁使同一时刻最多有一个任务触发付费生成，繁忙的手动触发返回 409。由于用量预算尚未接入，`GENERATION_JOBS_SCHEDULER_ENABLED` 默认 `false`，保存配置不会自行产生付费调用；设置为 `true` 并重启后端才启用自动扫描。失败恢复与费用保护仍在开发中。
 
 `POST /api/generations/scripts/{id}/revise` 接收 `expectedVersion`、`instruction` 和可选的 `conversationId`，返回新版本与会话 ID；同一会话的最近 3 条修改要求进入模型上下文。旧版本在 `GET /api/generations/scripts/{id}/versions` 可查，来源 ID 必须保留；旧版本号写入返回 409。所有读写从登录态限定用户，跨用户脚本或会话不会进入模型上下文。内容生成和修改会真实调用模型，请先在 `.env` 设置 DeepSeek API Key。
 

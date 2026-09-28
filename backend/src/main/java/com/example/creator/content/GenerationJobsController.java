@@ -64,7 +64,8 @@ public class GenerationJobsController {
     private ResponseEntity<ErrorView> failure(ContentValidator.ContentInvalid invalid) {
         var code = invalid.getMessage();
         return ResponseEntity.status("ACCOUNT_NOT_FOUND".equals(code) || "JOB_NOT_FOUND".equals(code)
-                ? 404 : "JOB_DISABLED".equals(code) ? 409 : 400).body(new ErrorView(code));
+                ? 404 : "JOB_DISABLED".equals(code) || "GENERATION_BUSY".equals(code) ? 409 : 400)
+                .body(new ErrorView(code));
     }
 
     public record ErrorView(String code) { }

@@ -12,6 +12,8 @@ import java.time.ZoneId;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import org.redisson.api.RedissonClient;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -23,13 +25,15 @@ public class GenerationJobsService {
     private final AccountProfiles accounts;
     private final GenerationService generation;
     private final ObjectMapper json;
+    private final RedissonClient redisson;
 
     GenerationJobsService(JdbcTemplate jdbc, AccountProfiles accounts, GenerationService generation,
-                          ObjectMapper json) {
+                          ObjectMapper json, RedissonClient redisson) {
         this.jdbc = jdbc;
         this.accounts = accounts;
         this.generation = generation;
         this.json = json;
+        this.redisson = redisson;
     }
 
     @Transactional
@@ -73,17 +77,49 @@ public class GenerationJobsService {
     }
 
     public TriggerRun trigger(long ownerId, String jobId, TriggerSource source) {
+        return trigger(ownerId, jobId, source, null).orElseThrow();
+    }
+
+    Optional<TriggerRun> triggerScheduled(long ownerId, String jobId, String runKey) {
+        try {
+            return trigger(ownerId, jobId, TriggerSource.SCHEDULED, runKey);
+        } catch (ContentValidator.ContentInvalid invalid) {
+            if ("JOB_DISABLED".equals(invalid.getMessage())) return Optional.empty();
+            throw invalid;
+        }
+    }
+
+    private Optional<TriggerRun> trigger(long ownerId, String jobId, TriggerSource source, String runKey) {
         var job = find(ownerId, jobId)
                 .orElseThrow(() -> new ContentValidator.ContentInvalid("JOB_NOT_FOUND"));
         if (source == TriggerSource.SCHEDULED && !job.enabled())
             throw new ContentValidator.ContentInvalid("JOB_DISABLED");
+        var lock = redisson.getLock("generation:paid");
+        if (!lock.tryLock()) {
+            if (source == TriggerSource.MANUAL)
+                throw new ContentValidator.ContentInvalid("GENERATION_BUSY");
+            return Optional.empty();
+        }
+        try {
+            return execute(ownerId, job, source, runKey);
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    private Optional<TriggerRun> execute(long ownerId, Job job, TriggerSource source, String runKey) {
         var id = UUID.randomUUID().toString();
         var requestId = UUID.randomUUID().toString();
-        jdbc.update("""
+        try {
+            jdbc.update("""
                 INSERT INTO generation_job_triggers (id, job_id, owner_id, account_id,
-                                                     trigger_source, status, request_id)
-                VALUES (?, ?, ?, ?, ?, 'RUNNING', ?)
-                """, id, job.id(), ownerId, job.accountId(), source.name(), requestId);
+                                                     trigger_source, status, request_id, run_key)
+                VALUES (?, ?, ?, ?, ?, 'RUNNING', ?, ?)
+                """, id, job.id(), ownerId, job.accountId(), source.name(), requestId, runKey);
+        } catch (DuplicateKeyException duplicate) {
+            if (runKey == null) throw duplicate;
+            return findScheduledTrigger(ownerId, job.id(), runKey);
+        }
         try {
             var request = new GenerationService.Request(job.accountId(), "WEEK_PLAN", null,
                     job.instruction(), null, null, job.slots(), requestId);
@@ -100,7 +136,15 @@ public class GenerationJobsService {
                     "TRIGGER_FAILED", id, ownerId);
             throw failed;
         }
-        return findTrigger(ownerId, id).orElseThrow();
+        return findTrigger(ownerId, id);
+    }
+
+    private Optional<TriggerRun> findScheduledTrigger(long ownerId, String jobId, String runKey) {
+        return jdbc.query("""
+                SELECT id, job_id, account_id, trigger_source, status, request_id,
+                       generation_run_id, error_code
+                FROM generation_job_triggers WHERE owner_id = ? AND job_id = ? AND run_key = ?
+                """, this::mapTrigger, ownerId, jobId, runKey).stream().findFirst();
     }
 
     public List<TriggerRun> triggers(long ownerId, String jobId) {

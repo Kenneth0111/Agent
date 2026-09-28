@@ -3,7 +3,11 @@ package com.example.creator.content;
 import com.example.creator.IntegrationTestSupport;
 import com.example.creator.account.AccountService;
 import java.time.LocalTime;
+import java.time.Instant;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -25,6 +29,7 @@ class GenerationJobsServiceTest extends IntegrationTestSupport {
     @Autowired private AccountService accounts;
     @Autowired private ContentService content;
     @Autowired private GenerationJobsService jobs;
+    @Autowired private GenerationJobScanner scanner;
     @MockitoBean private GenerationService generation;
 
     @Test
@@ -80,5 +85,44 @@ class GenerationJobsServiceTest extends IntegrationTestSupport {
         assertThat(disabled.id()).isEqualTo(job.id());
         assertThatThrownBy(() -> jobs.trigger(owner, job.id(), GenerationJobsService.TriggerSource.SCHEDULED))
                 .isInstanceOf(ContentValidator.ContentInvalid.class).hasMessage("JOB_DISABLED");
+    }
+
+    @Test
+    void concurrentScansCreateOnlyOneWeeklyRun() throws Exception {
+        long owner = jdbc.queryForObject("SELECT id FROM users WHERE email = ?", Long.class,
+                "creator-a@example.test");
+        var account = accounts.create(owner, new AccountService.AccountInput("定时去重账号", "程序员",
+                "Java 和英语", List.of("Java 面试", "英语跟读"), 3));
+        var slots = List.of(new GenerationService.WeekSlot("Java 面试", List.of("m-1"), "第一条"),
+                new GenerationService.WeekSlot("Java 面试", List.of("m-2"), "第二条"),
+                new GenerationService.WeekSlot("英语跟读", List.of("m-3"), "跟读"));
+        var job = jobs.save(owner, account.id(), new GenerationJobsService.JobInput(1,
+                LocalTime.of(9, 0), "Asia/Shanghai", true, "准备下周内容", slots));
+        scanner.scanDue(Instant.parse("2026-09-28T00:59:00Z"));
+        assertThat(jobs.triggers(owner, job.id())).isEmpty();
+
+        var started = content.startRun(owner, account.id(), "WEEK_PLAN");
+        var run = content.finishRun(owner, started.id(), "week-batch-2", 6);
+        var entered = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        when(generation.generate(eq(owner), any())).thenAnswer(call -> {
+            entered.countDown();
+            if (!release.await(30, TimeUnit.SECONDS)) throw new IllegalStateException("test timed out");
+            return run;
+        });
+        var executor = Executors.newSingleThreadExecutor();
+        try {
+            var first = executor.submit(() -> scanner.scanDue(Instant.parse("2026-09-28T01:01:00Z")));
+            assertThat(entered.await(30, TimeUnit.SECONDS)).isTrue();
+            scanner.scanDue(Instant.parse("2026-09-28T01:01:00Z"));
+            release.countDown();
+            first.get(30, TimeUnit.SECONDS);
+            scanner.scanDue(Instant.parse("2026-09-28T01:02:00Z"));
+        } finally {
+            release.countDown();
+            executor.shutdownNow();
+        }
+        assertThat(jobs.triggers(owner, job.id())).hasSize(1);
+        verify(generation, org.mockito.Mockito.times(1)).generate(eq(owner), any());
     }
 }
