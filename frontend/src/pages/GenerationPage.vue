@@ -299,15 +299,15 @@ onMounted(load)
         <button type="button" :disabled="pending || !instruction.trim() || !selectedTopic.topic.sourceIds.length" @click="generate('SCRIPT')">{{ pending ? '生成中…' : '按选题写脚本' }}</button>
       </article>
       <article v-for="item in scripts" :key="item.id" class="result script">
-        <small>脚本草稿 · 版本 {{ item.version }}</small>
+        <small>{{ item.status === 'CONFIRMED' ? '已确认脚本' : '脚本草稿' }} · 版本 {{ item.version }}</small>
         <small>口播稿 {{ item.script.spokenText.length }} 字符 · 请按实际语速核对时长</small>
         <p class="preserve">{{ item.script.spokenText }}</p>
         <p class="preserve"><strong>拍摄建议：</strong>{{ item.script.shootingNotes }}</p>
         <ul class="sources"><li v-for="id in item.script.sourceIds" :key="id">{{ source(id)?.title ?? id }}</li></ul>
         <label :for="`revision-${item.id}`">定向修改这条脚本</label>
         <textarea :id="`revision-${item.id}`" v-model="revisions[item.id]" rows="2" maxlength="500"
-          :disabled="pending" placeholder="例如：改成 45 秒口播，语气自然，保留事实和来源" />
-        <button type="button" :disabled="pending || !revisions[item.id]?.trim()" @click="revise(item)">保存新版本</button>
+          :disabled="pending || item.status === 'CONFIRMED'" placeholder="例如：改成 45 秒口播，语气自然，保留事实和来源" />
+        <button type="button" :disabled="pending || item.status === 'CONFIRMED' || !revisions[item.id]?.trim()" @click="revise(item)">保存新版本</button>
         <button type="button" class="history-button" :disabled="pending" @click="showHistory(item.id)">
           {{ histories[item.id] ? '收起历史版本' : '查看历史版本' }}
         </button>

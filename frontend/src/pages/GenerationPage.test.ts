@@ -100,6 +100,21 @@ describe('content generation page', () => {
     wrapper.unmount()
   })
 
+  it('shows a missing-evidence failure without claiming a saved draft', async () => {
+    vi.mocked(postJsonWithCsrf).mockResolvedValue({ id: 'run-failed', accountId: 'account-1',
+      mode: 'TOPICS', status: 'FAILED', resultId: null,
+      errorCode: 'INSUFFICIENT_MATERIAL', failedNode: 'retrieveEvidence' })
+    const wrapper = mount(GenerationPage)
+    await flushPromises()
+    await wrapper.get('#generation-instruction').setValue('找一份不存在的资料')
+    await wrapper.findAll('button').find(button => button.text() === '生成选题')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[role="alert"]').text()).toContain('缺少可引用的资料')
+    expect(wrapper.get('[role="status"]').text()).toContain('检索资料失败')
+    expect(wrapper.text()).not.toContain('已保存草稿。')
+    wrapper.unmount()
+  })
+
   it('sends the selected script version and conversation when revising', async () => {
     const script = { id: 'script-1', topicId: 'topic-1', script: { spokenText: '旧稿', shootingNotes: '录屏', sourceIds: ['material-1'] },
       status: 'DRAFT', version: 2, conversationId: 'conversation-1' }
@@ -210,6 +225,26 @@ describe('content generation page', () => {
     expect(wrapper.text()).toContain('Small steps can build lasting habits.')
     expect(wrapper.text()).toContain('原创英语短文')
     expect(vi.mocked(request)).toHaveBeenCalledWith('/api/generations/scripts?topicId=topic-3')
+    wrapper.unmount()
+  })
+
+  it('shows confirmed scripts as confirmed and prevents a revision from this page', async () => {
+    const confirmed = { id: 'script-1', topicId: 'topic-1', script: {
+      spokenText: '已确认口播', shootingNotes: '口播', sourceIds: ['material-1'] },
+    status: 'CONFIRMED', version: 3, conversationId: null }
+    vi.mocked(request).mockImplementation(async path => {
+      if (path === '/api/accounts') return [account]
+      if (path === '/api/materials') return [material]
+      if (path.startsWith('/api/generations/topics?')) return [topic]
+      if (path.startsWith('/api/generations/scripts?')) return [confirmed]
+      if (path.startsWith('/api/generations/week-plans?')) return []
+      throw new Error(`Unexpected path ${path}`)
+    })
+    const wrapper = mount(GenerationPage)
+    await flushPromises()
+    expect(wrapper.get('.script').text()).toContain('已确认脚本 · 版本 3')
+    expect(wrapper.get('#revision-script-1').attributes('disabled')).toBeDefined()
+    expect(wrapper.findAll('button').find(button => button.text() === '保存新版本')?.attributes('disabled')).toBeDefined()
     wrapper.unmount()
   })
 })
