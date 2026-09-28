@@ -19,6 +19,7 @@ beforeEach(() => {
   vi.mocked(putJsonWithCsrf).mockReset()
   vi.mocked(request).mockImplementation(async path => {
     if (path === '/api/accounts') return [account]
+    if (path === '/api/materials') return [{ id: 'material-1', title: 'Java 资料', accountIds: ['account-1'] }]
     if (path.startsWith('/api/generations/week-plans?')) return []
     if (path.startsWith('/api/schedules/weeks?')) return week
     if (path === '/api/generations/scripts/script-1') return script
@@ -120,6 +121,31 @@ describe('weekly schedule page', () => {
       expect((wrapper.get(`#schedule-script-item-${index}`).element as HTMLTextAreaElement).value)
         .toBe(`第 ${index} 条口播稿`)
     }
+    wrapper.unmount()
+  })
+
+  it('regenerates only the selected item with its current version and one source', async () => {
+    vi.mocked(request).mockImplementation(async path => {
+      if (path === '/api/accounts') return [account]
+      if (path === '/api/materials') return [{ id: 'material-1', title: 'Java 资料', accountIds: ['account-1'] }]
+      if (path.startsWith('/api/generations/week-plans?')) return []
+      if (path.startsWith('/api/schedules/weeks?')) return week
+      if (path === '/api/generations/scripts/script-1') return script
+      if (path === '/api/generations/scripts/script-new') return { ...script, id: 'script-new',
+        topicId: 'topic-new', script: { ...script.script, spokenText: '替换口播稿' } }
+      throw new Error(`Unexpected path ${path}`)
+    })
+    vi.mocked(postJsonWithCsrf).mockResolvedValue({ ...week.items[0], topicId: 'topic-new',
+      scriptId: 'script-new', version: 2 })
+    const wrapper = mount(SchedulePage)
+    await flushPromises()
+    await wrapper.get('#schedule-redo-item-1').setValue('换一道 Java 面试题')
+    await wrapper.get('[aria-label="第 1 条参考资料"]').setValue('material-1')
+    await wrapper.get('[data-action="regenerate"]').trigger('click')
+    await flushPromises()
+    expect(vi.mocked(postJsonWithCsrf)).toHaveBeenCalledWith('/api/schedules/items/item-1/regenerate',
+      { expectedVersion: 1, instruction: '换一道 Java 面试题', materialIds: ['material-1'] }, 180_000)
+    expect((wrapper.get('#schedule-script-item-1').element as HTMLTextAreaElement).value).toBe('替换口播稿')
     wrapper.unmount()
   })
 })

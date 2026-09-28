@@ -45,11 +45,31 @@ class ScheduleServiceTest extends IntegrationTestSupport {
                 .isInstanceOf(ContentValidator.ContentInvalid.class).hasMessage("PLAN_NOT_FOUND");
 
         var attached = schedules.attachBatch(owner, week.id(), batchId);
+        assertThat(schedules.slot(stranger, attached.items().getFirst().id())).isEmpty();
+        assertThatThrownBy(() -> schedules.replaceDraft(stranger, attached.items().getFirst().id(), 2,
+                items.getFirst().topicId(), items.getFirst().scriptId()))
+                .isInstanceOf(ContentValidator.ContentInvalid.class).hasMessage("PLAN_ITEM_NOT_FOUND");
         assertThat(attached.items()).extracting(ScheduleService.Item::scriptId)
                 .containsExactlyElementsOf(items.stream().map(ContentService.WeekItem::scriptId).toList());
         assertThat(schedules.attachBatch(owner, week.id(), batchId)).isEqualTo(attached);
         assertThatThrownBy(() -> schedules.changeColumn(owner, attached.items().getFirst().id(), 2, "英语跟读"))
                 .isInstanceOf(ContentValidator.ContentInvalid.class).hasMessage("PLAN_ITEM_OCCUPIED");
+        var replacementTopic = content.saveTopic(owner, account.id(), new ContentValidator.Topic("Java 面试",
+                "替换选题", "程序员", "新角度", "开头", "提纲", List.of("m-1"), "资料"), Set.of("m-1"));
+        var replacementScript = content.saveScript(owner, replacementTopic,
+                new ContentValidator.Script("替换口播稿", "录屏", List.of("m-1")), Set.of("m-1"));
+        var replaced = schedules.replaceDraft(owner, attached.items().getFirst().id(), 2,
+                replacementTopic, replacementScript);
+        assertThat(replaced.version()).isEqualTo(3);
+        assertThat(schedules.find(owner, week.id()).orElseThrow().items())
+                .extracting(ScheduleService.Item::scriptId)
+                .containsExactly(replacementScript, items.get(1).scriptId(), items.get(2).scriptId());
+        assertThatThrownBy(() -> schedules.replaceDraft(owner, replaced.id(), 2,
+                replacementTopic, replacementScript)).isInstanceOf(ContentService.VersionConflict.class);
+        content.confirmScript(owner, items.get(1).scriptId(), 1);
+        assertThatThrownBy(() -> schedules.replaceDraft(owner, attached.items().get(1).id(), 2,
+                replacementTopic, replacementScript))
+                .isInstanceOf(ContentValidator.ContentInvalid.class).hasMessage("SCRIPT_CONFIRMED");
     }
 
     @Test

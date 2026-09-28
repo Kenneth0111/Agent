@@ -8,7 +8,7 @@ interface Topic { id: string; accountId: string; topic: { column: string; title:
 interface Script { id: string; topicId: string; script: { spokenText: string; shootingNotes: string; sourceIds: string[] }; status: string; version: number; conversationId: string | null }
 interface ScriptVersion { version: number; script: { spokenText: string; shootingNotes: string; sourceIds: string[] }; instruction: string }
 interface WeekPlan { id: string; accountId: string; status: string; items: { column: string; topicId: string; scriptId: string }[] }
-interface Run { id: string; accountId: string; mode: string; status: 'SUCCEEDED' | 'FAILED'; resultId: string | null; errorCode: string | null; failedNode?: string | null }
+interface Run { id: string; accountId: string; mode: string; status: 'RUNNING' | 'SUCCEEDED' | 'FAILED'; resultId: string | null; errorCode: string | null; failedNode?: string | null }
 
 const accounts = ref<Account[]>([])
 const materials = ref<Material[]>([])
@@ -26,6 +26,7 @@ const histories = ref<Record<string, ScriptVersion[]>>({})
 const error = ref('')
 const run = ref<Run | null>(null)
 const pending = ref(false)
+let weekRequest: { signature: string; id: string } | null = null
 let topicsRequest = 0
 let scriptsRequest = 0
 let weeksRequest = 0
@@ -56,7 +57,7 @@ function validScript(value: unknown): value is Script {
 }
 function validRun(value: unknown): value is Run {
   return typeof value === 'object' && value !== null && 'status' in value && 'id' in value
-    && (value.status === 'SUCCEEDED' || value.status === 'FAILED') && typeof value.id === 'string'
+    && (value.status === 'RUNNING' || value.status === 'SUCCEEDED' || value.status === 'FAILED') && typeof value.id === 'string'
 }
 function validWeek(value: unknown): value is WeekPlan {
   return typeof value === 'object' && value !== null && 'id' in value && 'accountId' in value
@@ -127,7 +128,8 @@ function failureMessage(code: string | null) {
     MATERIAL_NOT_FOUND: '所选资料已不可用或不属于当前账号。', TOPIC_NOT_FOUND: '选题已不可用。',
     SCRIPT_NOT_FOUND: '脚本已不可用。', CONVERSATION_NOT_FOUND: '该会话已不可用。',
     VERSION_CONFLICT: '草稿已有新版本，已重新加载，请核对后再修改。',
-    SOURCE_CHANGED: '修改稿改变了来源引用，请重试。' }[code ?? '']) ?? '生成失败，请稍后重试。'
+    SOURCE_CHANGED: '修改稿改变了来源引用，请重试。',
+    REQUEST_ID_REUSED: '生成条件已变化，请重新发起。' }[code ?? '']) ?? '生成失败，请稍后重试。'
 }
 function nodeLabel(node: string | null | undefined): string {
   const slot = /^slot(\d)\/(.+)$/.exec(node ?? '')
@@ -180,17 +182,20 @@ async function generateWeek() {
   pending.value = true
   error.value = ''
   run.value = null
+  const payload = { accountId: accountId.value, mode: 'WEEK_PLAN', instruction: instruction.value.trim(), slots: [
+    { column: 'Java 面试', materialIds: [weekMaterials.value.java1], instruction: '第一条 Java 快问快答' },
+    { column: 'Java 面试', materialIds: [weekMaterials.value.java2], instruction: '第二条 Java 快问快答，避免重复第一条' },
+    { column: '英语跟读', materialIds: [weekMaterials.value.english], instruction: '一条英语跟读练习' },
+  ] }
+  const signature = JSON.stringify(payload)
+  if (weekRequest?.signature !== signature) weekRequest = { signature, id: crypto.randomUUID() }
   try {
-    const result = await postJsonWithCsrf('/api/generations', { accountId: accountId.value,
-      mode: 'WEEK_PLAN', instruction: instruction.value.trim(), slots: [
-        { column: 'Java 面试', materialIds: [weekMaterials.value.java1], instruction: '第一条 Java 快问快答' },
-        { column: 'Java 面试', materialIds: [weekMaterials.value.java2], instruction: '第二条 Java 快问快答，避免重复第一条' },
-        { column: '英语跟读', materialIds: [weekMaterials.value.english], instruction: '一条英语跟读练习' },
-      ] }, 180_000)
+    const result = await postJsonWithCsrf('/api/generations', { ...payload, requestId: weekRequest.id }, 180_000)
     if (!validRun(result)) throw new Error('Invalid week run')
     run.value = result
+    if (result.status !== 'RUNNING') weekRequest = null
     if (result.status === 'FAILED') error.value = failureMessage(result.errorCode)
-    else await Promise.all([loadWeeks(), loadTopics()])
+    else if (result.status === 'SUCCEEDED') await Promise.all([loadWeeks(), loadTopics()])
   } catch (cause) {
     error.value = cause instanceof HttpError ? failureMessage(cause.code ?? null) : '暂时无法生成整周草稿。'
   } finally { pending.value = false }
@@ -263,7 +268,7 @@ onMounted(load)
         <button type="button" :disabled="pending || !instruction.trim() || !weekMaterials.java1 || !weekMaterials.java2 || !weekMaterials.english || weekMaterials.java1 === weekMaterials.java2"
           @click="generateWeek">{{ pending ? '生成中…' : '生成整周草稿' }}</button>
       </fieldset>
-      <p v-if="run" role="status">{{ run.status === 'SUCCEEDED' ? '已保存草稿。' : `${nodeLabel(run.failedNode)}失败（运行 ID：${run.id}）` }}</p>
+      <p v-if="run" role="status">{{ run.status === 'SUCCEEDED' ? '已保存草稿。' : run.status === 'RUNNING' ? '生成仍在进行中，稍后可再次点击查看结果。' : `${nodeLabel(run.failedNode)}失败（运行 ID：${run.id}）` }}</p>
       <p v-if="error" role="alert" class="error">{{ error }}</p>
     </div>
     <div class="results">

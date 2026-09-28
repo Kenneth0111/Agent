@@ -3,7 +3,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import GenerationPage from './GenerationPage.vue'
 import { postJsonWithCsrf, request } from '../api/http'
 
-vi.mock('../api/http', () => ({ request: vi.fn(), postJsonWithCsrf: vi.fn() }))
+vi.mock('../api/http', async importOriginal => ({ ...await importOriginal<typeof import('../api/http')>(),
+  request: vi.fn(), postJsonWithCsrf: vi.fn() }))
 
 const account = { id: 'account-1', name: '技术账号' }
 const material = { id: 'material-1', title: 'Java 21 资料', sourceUrl: null, accountIds: ['account-1'] }
@@ -149,6 +150,39 @@ describe('content generation page', () => {
         { column: '英语跟读', materialIds: ['material-3'], instruction: '一条英语跟读练习' },
       ],
     }), 180_000)
+    wrapper.unmount()
+  })
+
+  it('retries an uncertain weekly request with the same id and changes id for new content', async () => {
+    vi.mocked(request).mockImplementation(async path => {
+      if (path === '/api/accounts') return [account]
+      if (path === '/api/materials') return [material,
+        { ...material, id: 'material-2' }, { ...material, id: 'material-3' }]
+      if (path.startsWith('/api/generations/topics?')) return [topic]
+      if (path.startsWith('/api/generations/scripts?')) return []
+      if (path.startsWith('/api/generations/week-plans?')) return []
+      throw new Error(`Unexpected path ${path}`)
+    })
+    vi.mocked(postJsonWithCsrf).mockRejectedValue(new Error('Connection dropped'))
+    const wrapper = mount(GenerationPage)
+    await flushPromises()
+    await wrapper.get('#generation-instruction').setValue('本周三条内容')
+    await wrapper.get('#week-java-1').setValue('material-1')
+    await wrapper.get('#week-java-2').setValue('material-2')
+    await wrapper.get('#week-english').setValue('material-3')
+    const generate = () => wrapper.findAll('button').find(button => button.text() === '生成整周草稿')!.trigger('click')
+    await generate()
+    await flushPromises()
+    await generate()
+    await flushPromises()
+    const bodies = vi.mocked(postJsonWithCsrf).mock.calls.map(call => call[1] as { requestId: string })
+    expect(bodies[0].requestId).toMatch(/^[0-9a-f-]{36}$/)
+    expect(bodies[1].requestId).toBe(bodies[0].requestId)
+    await wrapper.get('#generation-instruction').setValue('另一组内容')
+    await generate()
+    await flushPromises()
+    expect((vi.mocked(postJsonWithCsrf).mock.calls[2][1] as { requestId: string }).requestId)
+      .not.toBe(bodies[0].requestId)
     wrapper.unmount()
   })
 

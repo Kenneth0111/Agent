@@ -17,10 +17,13 @@ import org.springframework.web.bind.annotation.RestController;
 public class ScheduleController {
     private final CurrentUser currentUser;
     private final ScheduleService schedules;
+    private final ScheduleRegenerationService regeneration;
 
-    ScheduleController(CurrentUser currentUser, ScheduleService schedules) {
+    ScheduleController(CurrentUser currentUser, ScheduleService schedules,
+                       ScheduleRegenerationService regeneration) {
         this.currentUser = currentUser;
         this.schedules = schedules;
+        this.regeneration = regeneration;
     }
 
     @PostMapping("/weeks")
@@ -83,11 +86,29 @@ public class ScheduleController {
         }
     }
 
+    @PostMapping("/items/{id}/regenerate")
+    public ResponseEntity<?> regenerate(@PathVariable String id,
+                                        @RequestBody(required = false) ScheduleRegenerationService.Input input) {
+        try {
+            return ResponseEntity.ok(regeneration.regenerate(currentUser.id(), id, input));
+        } catch (ContentService.VersionConflict conflict) {
+            return ResponseEntity.status(409).body(new ErrorView("VERSION_CONFLICT"));
+        } catch (ContentValidator.ContentInvalid invalid) {
+            return failure(invalid);
+        } catch (GenerationGraph.StageFailure failed) {
+            var code = failed.getMessage();
+            var status = "MODEL_TIMEOUT".equals(code) ? 504 : code.startsWith("MODEL_") ? 503 : 400;
+            return ResponseEntity.status(status).body(new StageErrorView(code, failed.node()));
+        }
+    }
+
     private ResponseEntity<ErrorView> failure(ContentValidator.ContentInvalid invalid) {
         var code = invalid.getMessage();
         return ResponseEntity.status("ACCOUNT_NOT_FOUND".equals(code) || "PLAN_ITEM_NOT_FOUND".equals(code)
                 || "PLAN_NOT_FOUND".equals(code) || "WEEK_PLAN_NOT_FOUND".equals(code)
-                ? 404 : "PLAN_ITEM_OCCUPIED".equals(code) ? 409 : 400).body(new ErrorView(code));
+                || "TOPIC_NOT_FOUND".equals(code) || "SCRIPT_NOT_FOUND".equals(code)
+                ? 404 : "PLAN_ITEM_OCCUPIED".equals(code) || "SCRIPT_CONFIRMED".equals(code)
+                ? 409 : 400).body(new ErrorView(code));
     }
 
     public record WeekInput(String accountId, LocalDate weekStart) { }
@@ -95,4 +116,5 @@ public class ScheduleController {
     public record ColumnInput(int expectedVersion, String column) { }
     public record BatchInput(String batchId) { }
     public record ErrorView(String code) { }
+    public record StageErrorView(String code, String failedNode) { }
 }

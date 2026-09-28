@@ -64,6 +64,8 @@ npm --prefix frontend run dev
 
 周计划页面可按账号和周查看计划项，关联整周草稿，修改日期、栏目和脚本，并确认或重新开放脚本。`PUT /api/generations/scripts/{id}` 接收 `expectedVersion`、`spokenText`、`shootingNotes` 保存人工修改，保留原始资料引用及版本历史；已确认脚本须先重新开放。页面在切换账号或周次前提示未保存修改。
 
+整周生成请求 `POST /api/generations` 的 `WEEK_PLAN` 模式须附带 UUID `requestId`；同一用户使用相同标识及内容重试，会返回原生成运行而不再次调用模型；标识相同但内容不同返回 `REQUEST_ID_REUSED`。页面在网络失败后保留本次请求标识供重试，修改生成条件则换用新标识。`POST /api/schedules/items/{id}/regenerate` 接收 `expectedVersion`、`instruction`、`materialIds`，只为选中计划项生成新选题与脚本，并在版本一致时替换其引用；已确认脚本会在模型调用前被拒绝。其它计划项及旧草稿保留。
+
 ```powershell
 mvn -f backend/pom.xml test
 mvn -f backend/pom.xml package

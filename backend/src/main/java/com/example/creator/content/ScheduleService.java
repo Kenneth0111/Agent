@@ -158,6 +158,50 @@ public class ScheduleService {
         return find(ownerId, weekId).orElseThrow();
     }
 
+    public Optional<Slot> slot(long ownerId, String itemId) {
+        return jdbc.query("""
+                SELECT w.account_id, i.id, i.column_name, i.scheduled_date,
+                       i.topic_id, i.script_id, i.version
+                FROM content_schedule_items i JOIN content_schedule_weeks w ON w.id = i.week_id
+                WHERE i.id = ? AND w.owner_id = ?
+                """, (row, ignored) -> new Slot(row.getString("account_id"), mapItem(row, ignored)),
+                itemId, ownerId).stream().findFirst();
+    }
+
+    @Transactional
+    public Item replaceDraft(long ownerId, String itemId, int expectedVersion, String topicId, String scriptId) {
+        var slots = jdbc.query("""
+                SELECT w.account_id, i.id, i.column_name, i.scheduled_date,
+                       i.topic_id, i.script_id, i.version
+                FROM content_schedule_items i JOIN content_schedule_weeks w ON w.id = i.week_id
+                WHERE i.id = ? AND w.owner_id = ? FOR UPDATE
+                """, (row, ignored) -> new Slot(row.getString("account_id"), mapItem(row, ignored)),
+                itemId, ownerId);
+        if (slots.isEmpty()) throw new ContentValidator.ContentInvalid("PLAN_ITEM_NOT_FOUND");
+        var slot = slots.getFirst();
+        if (slot.item().version() != expectedVersion) throw new ContentService.VersionConflict();
+        if (slot.item().scriptId() != null) {
+            var status = jdbc.queryForObject("""
+                    SELECT status FROM content_scripts WHERE id = ? AND owner_id = ? FOR UPDATE
+                    """, String.class, slot.item().scriptId(), ownerId);
+            if ("CONFIRMED".equals(status))
+                throw new ContentValidator.ContentInvalid("SCRIPT_CONFIRMED");
+        }
+        var topic = content.findTopic(ownerId, topicId)
+                .orElseThrow(() -> new ContentValidator.ContentInvalid("TOPIC_NOT_FOUND"));
+        var script = content.findScript(ownerId, scriptId)
+                .orElseThrow(() -> new ContentValidator.ContentInvalid("SCRIPT_NOT_FOUND"));
+        if (!slot.accountId().equals(topic.accountId()) || !slot.item().column().equals(topic.topic().column())
+                || !topicId.equals(script.topicId()))
+            throw new ContentValidator.ContentInvalid("INVALID_WEEK_PLAN");
+        int changed = jdbc.update("""
+                UPDATE content_schedule_items SET topic_id = ?, script_id = ?, version = version + 1
+                WHERE id = ? AND version = ?
+                """, topicId, scriptId, itemId, expectedVersion);
+        if (changed == 0) throw new ContentService.VersionConflict();
+        return slot(ownerId, itemId).orElseThrow().item();
+    }
+
     private Item mapItem(ResultSet row, int ignored) throws SQLException {
         return new Item(row.getString("id"), row.getString("column_name"),
                 row.getDate("scheduled_date").toLocalDate(), row.getString("topic_id"),
@@ -178,6 +222,7 @@ public class ScheduleService {
     }
 
     public record Week(String id, String accountId, LocalDate weekStart, List<Item> items) { }
+    public record Slot(String accountId, Item item) { }
     public record Item(String id, String column, LocalDate scheduledDate, String topicId,
                        String scriptId, int version) { }
 }

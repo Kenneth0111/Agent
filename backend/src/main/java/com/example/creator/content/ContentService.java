@@ -5,12 +5,16 @@ import com.example.creator.content.ContentValidator.Script;
 import com.example.creator.content.ContentValidator.Topic;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
 import java.util.Set;
 import java.util.UUID;
 import java.util.Optional;
 import java.util.List;
 import java.util.function.UnaryOperator;
 import org.springframework.dao.EmptyResultDataAccessException;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -280,6 +284,44 @@ public class ContentService {
         return new GenerationRun(id, accountId, mode, "RUNNING", 0, null, null);
     }
 
+    /** Reserve before model calls so a repeated request cannot start another weekly batch. */
+    public RunReservation reserveWeekRun(long ownerId, GenerationService.Request request) {
+        if (accounts.find(ownerId, request.accountId()).isEmpty())
+            throw new ContentValidator.ContentInvalid("ACCOUNT_NOT_FOUND");
+        try {
+            if (!UUID.fromString(request.requestId()).toString().equals(request.requestId()))
+                throw new IllegalArgumentException();
+        } catch (IllegalArgumentException | NullPointerException invalid) {
+            throw new ContentValidator.ContentInvalid("INVALID_REQUEST_ID");
+        }
+        String fingerprint;
+        try {
+            fingerprint = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+                    .digest(json.writeValueAsBytes(request)));
+        } catch (JsonProcessingException | NoSuchAlgorithmException impossible) {
+            throw new IllegalStateException(impossible);
+        }
+        var id = UUID.randomUUID().toString();
+        try {
+            jdbc.update("""
+                    INSERT INTO generation_runs (id, owner_id, account_id, mode, request_id, request_hash, status)
+                    VALUES (?, ?, ?, 'WEEK_PLAN', ?, ?, 'RUNNING')
+                    """, id, ownerId, request.accountId(), request.requestId(), fingerprint);
+            return new RunReservation(new GenerationRun(id, request.accountId(), "WEEK_PLAN",
+                    "RUNNING", 0, null, null), true);
+        } catch (DuplicateKeyException duplicate) {
+            var existing = jdbc.queryForObject("""
+                    SELECT id, account_id, request_hash FROM generation_runs
+                    WHERE owner_id = ? AND request_id = ?
+                    """, (row, ignored) -> new RequestRow(row.getString("id"), row.getString("account_id"),
+                    row.getString("request_hash")), ownerId, request.requestId());
+            if (existing == null || !existing.accountId().equals(request.accountId())
+                    || !existing.hash().equals(fingerprint))
+                throw new ContentValidator.ContentInvalid("REQUEST_ID_REUSED");
+            return new RunReservation(findRun(ownerId, existing.id()).orElseThrow(), false);
+        }
+    }
+
     public GenerationRun finishRun(long ownerId, String runId, String resultId, int attempts) {
         jdbc.update("UPDATE generation_runs SET status = 'SUCCEEDED', result_id = ?, attempts = ? WHERE owner_id = ? AND id = ?",
                 resultId, attempts, ownerId, runId);
@@ -364,5 +406,7 @@ public class ContentService {
     public record ScriptVersion(int version, Script script, String conversationId, String instruction) { }
     public record WeekItem(String column, String topicId, String scriptId) { }
     public record WeekPlan(String id, String accountId, List<WeekItem> items, String status) { }
+    public record RunReservation(GenerationRun run, boolean created) { }
+    private record RequestRow(String id, String accountId, String hash) { }
     public static final class VersionConflict extends RuntimeException { }
 }

@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { HttpError, postJsonWithCsrf, putJsonWithCsrf, request } from '../api/http'
 
 interface Account { id: string; name: string; columns: string[]; weeklyTarget: number }
+interface Material { id: string; title: string; accountIds: string[] }
 interface Item { id: string; column: string; scheduledDate: string; topicId: string | null; scriptId: string | null; version: number }
 interface Week { id: string; accountId: string; weekStart: string; items: Item[] }
 interface Batch { id: string; accountId: string; items: { column: string; topicId: string; scriptId: string }[] }
@@ -19,6 +20,7 @@ function mondayInShanghai(): string {
 }
 
 const accounts = ref<Account[]>([])
+const materials = ref<Material[]>([])
 const accountId = ref('')
 const weekStart = ref(mondayInShanghai())
 const week = ref<Week | null>(null)
@@ -26,6 +28,7 @@ const batches = ref<Batch[]>([])
 const batchId = ref('')
 const scripts = ref<Record<string, Script>>({})
 const edits = ref<Record<string, Edit>>({})
+const redo = ref<Record<string, { instruction: string; materialId: string }>>({})
 const loading = ref(false)
 const pending = ref(false)
 const error = ref('')
@@ -33,6 +36,8 @@ const notice = ref('')
 let loadSequence = 0
 
 const selectedAccount = computed(() => accounts.value.find(account => account.id === accountId.value))
+const availableMaterials = computed(() => materials.value.filter(material =>
+  material.accountIds.length === 0 || material.accountIds.includes(accountId.value)))
 const hasUnsaved = computed(() => week.value?.items.some(item => {
   const edit = edits.value[item.id]
   const script = item.scriptId ? scripts.value[item.scriptId] : undefined
@@ -44,6 +49,11 @@ function validAccount(value: unknown): value is Account {
   return typeof value === 'object' && value !== null && 'id' in value && typeof value.id === 'string'
     && 'name' in value && typeof value.name === 'string' && 'columns' in value && Array.isArray(value.columns)
     && 'weeklyTarget' in value && typeof value.weeklyTarget === 'number'
+}
+function validMaterial(value: unknown): value is Material {
+  return typeof value === 'object' && value !== null && 'id' in value && typeof value.id === 'string'
+    && 'title' in value && typeof value.title === 'string' && 'accountIds' in value
+    && Array.isArray(value.accountIds)
 }
 function validItem(value: unknown): value is Item {
   return typeof value === 'object' && value !== null && 'id' in value && typeof value.id === 'string'
@@ -95,6 +105,13 @@ async function loadAccounts() {
     accountId.value = result[0]?.id ?? ''
   } catch { error.value = '暂时无法读取创作账号。' }
 }
+async function loadMaterials() {
+  try {
+    const result = await request('/api/materials')
+    if (!Array.isArray(result) || !result.every(validMaterial)) throw new Error('Invalid materials')
+    materials.value = result
+  } catch { materials.value = [] }
+}
 async function loadWeek() {
   const sequence = ++loadSequence
   week.value = null
@@ -102,6 +119,7 @@ async function loadWeek() {
   batches.value = []
   batchId.value = ''
   edits.value = {}
+  redo.value = {}
   error.value = ''
   notice.value = ''
   if (!accountId.value || !weekStart.value) return
@@ -129,6 +147,7 @@ async function loadWeek() {
     scripts.value = Object.fromEntries(values.map(value => [value.id, value]))
     week.value = result
     resetEdits()
+    redo.value = Object.fromEntries(result.items.map(item => [item.id, { instruction: '', materialId: '' }]))
   } catch { if (sequence === loadSequence) error.value = '暂时无法读取周计划或草稿，请重试。' }
   finally { if (sequence === loadSequence) loading.value = false }
 }
@@ -136,7 +155,8 @@ function message(cause: unknown) {
   if (!(cause instanceof HttpError)) return '保存失败，请稍后重试。'
   return ({ VERSION_CONFLICT: '内容已有新版本，请重新加载后核对。', SCRIPT_CONFIRMED: '脚本已确认，请先重新开放编辑。',
     INVALID_WEEK_PLAN: '整周草稿与当前排期的栏目或条数不一致。', PLAN_ITEM_OCCUPIED: '计划项已有草稿，不能覆盖。',
-    INVALID_SCHEDULE_DATE: '发布日期须在当前周内。' }[cause.code ?? '']) ?? '保存失败，请稍后重试。'
+    INVALID_SCHEDULE_DATE: '发布日期须在当前周内。', MODEL_TIMEOUT: '生成超时，请稍后重试。',
+    INSUFFICIENT_MATERIAL: '参考资料不足，请先补充资料。', MATERIAL_NOT_FOUND: '所选资料已不可用。' }[cause.code ?? '']) ?? '保存失败，请稍后重试。'
 }
 function replaceItem(updated: Item) {
   if (week.value) week.value = { ...week.value,
@@ -219,9 +239,31 @@ async function changeScriptStatus(item: Item, action: 'confirm' | 'reopen') {
   } catch (cause) { error.value = message(cause) }
   finally { pending.value = false }
 }
+async function regenerate(item: Item) {
+  const input = redo.value[item.id]
+  if (pending.value || hasUnsaved.value || !input?.instruction.trim() || !input.materialId) return
+  pending.value = true; error.value = ''
+  let saved = false
+  try {
+    const result = await postJsonWithCsrf(`/api/schedules/items/${item.id}/regenerate`,
+      { expectedVersion: item.version, instruction: input.instruction.trim(),
+        materialIds: [input.materialId] }, 180_000)
+    if (!validItem(result) || !result.scriptId) throw new Error('Invalid item')
+    replaceItem(result)
+    saved = true
+    const script = await request(`/api/generations/scripts/${encodeURIComponent(result.scriptId)}`)
+    if (!validScript(script)) throw new Error('Invalid script')
+    scripts.value[script.id] = script
+    edits.value[item.id] = { ...edits.value[item.id], spokenText: script.script.spokenText,
+      shootingNotes: script.script.shootingNotes }
+    redo.value[item.id] = { instruction: '', materialId: '' }
+    notice.value = '已重做选中内容，其他计划项保持不变。'
+  } catch (cause) { error.value = saved ? '内容已重做，但新脚本暂时无法读取，请刷新页面。' : message(cause) }
+  finally { pending.value = false }
+}
 
 watch([accountId, weekStart], loadWeek)
-onMounted(loadAccounts)
+onMounted(() => { loadAccounts(); loadMaterials() })
 </script>
 
 <template>
@@ -282,6 +324,20 @@ onMounted(loadAccounts)
             <button v-else type="button" :disabled="pending || hasUnsaved" @click="changeScriptStatus(item, 'reopen')">重新编辑</button>
           </div>
         </template>
+        <div v-if="redo[item.id]" class="redo-fields">
+          <label :for="`schedule-redo-${item.id}`">只重做这一条</label>
+          <textarea :id="`schedule-redo-${item.id}`" v-model="redo[item.id].instruction" rows="2"
+            maxlength="500" :disabled="pending || scripts[item.scriptId ?? '']?.status === 'CONFIRMED'"
+            placeholder="例如：换一个 Java 面试问题" />
+          <select v-model="redo[item.id].materialId" :aria-label="`第 ${index + 1} 条参考资料`"
+            :disabled="pending || scripts[item.scriptId ?? '']?.status === 'CONFIRMED'">
+            <option value="">选择参考资料</option>
+            <option v-for="material in availableMaterials" :key="material.id" :value="material.id">{{ material.title }}</option>
+          </select>
+          <button type="button" data-action="regenerate" :disabled="pending || hasUnsaved || !redo[item.id].instruction.trim()
+            || !redo[item.id].materialId || scripts[item.scriptId ?? '']?.status === 'CONFIRMED'"
+            @click="regenerate(item)">重新生成这一条</button>
+        </div>
       </article>
     </div>
   </section>
@@ -299,6 +355,7 @@ p { color: #637166; font-size: 13px; line-height: 1.7; margin: 0; }
 .item-head span { color: #637166; font-size: 12px; }
 .item-field > input, .item-field > select { flex: 1; min-width: 0; }
 .item-actions { flex-wrap: wrap; }
+.redo-fields { display: grid; gap: 8px; border-top: 1px dashed #b7c1b4; padding-top: 12px; }
 label { color: #526252; font-size: 12px; }
 input, select, textarea { min-width: 0; width: 100%; border: 1px solid #b7c1b4; border-radius: 4px; padding: 9px; background: #fff; font: inherit; color: #263b32; }
 textarea { resize: vertical; }

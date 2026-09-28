@@ -202,4 +202,32 @@ class ContentPersistenceTest extends IntegrationTestSupport {
         assertThatThrownBy(() -> content.saveWeekPlan(stranger, account.id(), items))
                 .isInstanceOf(ContentValidator.ContentInvalid.class).hasMessage("ACCOUNT_NOT_FOUND");
     }
+
+    @Test
+    void weekRequestIdReturnsOneRunAndRejectsDifferentPayload() {
+        long owner = jdbc.queryForObject("SELECT id FROM users WHERE email = ?", Long.class,
+                "creator-a@example.test");
+        long stranger = jdbc.queryForObject("SELECT id FROM users WHERE email = ?", Long.class,
+                "creator-b@example.test");
+        var account = accounts.create(owner, new AccountService.AccountInput("幂等周草稿", "程序员",
+                "Java 和英语", List.of("Java 面试", "英语跟读"), 3));
+        var slots = List.of(new GenerationService.WeekSlot("Java 面试", List.of("m-1"), "第一条"),
+                new GenerationService.WeekSlot("Java 面试", List.of("m-2"), "第二条"),
+                new GenerationService.WeekSlot("英语跟读", List.of("m-3"), "跟读"));
+        var request = new GenerationService.Request(account.id(), "WEEK_PLAN", null, "本周内容",
+                null, null, slots, "123e4567-e89b-12d3-a456-426614174003");
+
+        var first = content.reserveWeekRun(owner, request);
+        assertThat(first.created()).isTrue();
+        content.finishRun(owner, first.run().id(), "draft-batch-1", 6);
+        var duplicate = content.reserveWeekRun(owner, request);
+        assertThat(duplicate.created()).isFalse();
+        assertThat(duplicate.run().id()).isEqualTo(first.run().id());
+        assertThat(duplicate.run().resultId()).isEqualTo("draft-batch-1");
+        assertThatThrownBy(() -> content.reserveWeekRun(owner, new GenerationService.Request(account.id(),
+                "WEEK_PLAN", null, "另一组内容", null, null, slots, request.requestId())))
+                .isInstanceOf(ContentValidator.ContentInvalid.class).hasMessage("REQUEST_ID_REUSED");
+        assertThatThrownBy(() -> content.reserveWeekRun(stranger, request))
+                .isInstanceOf(ContentValidator.ContentInvalid.class).hasMessage("ACCOUNT_NOT_FOUND");
+    }
 }
