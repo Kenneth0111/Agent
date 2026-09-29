@@ -30,19 +30,31 @@ public class McpSearchGateway {
     private final Set<String> allowedTools;
     private final Duration timeout;
     private final ClientFactory clientFactory;
+    private final UsageLedger usage;
 
     public McpSearchGateway(String endpoint, Map<String, String> headers, Set<String> allowedTools,
                             Duration timeout) {
-        this(endpoint, headers, allowedTools, timeout, McpSearchGateway::connect);
+        this(endpoint, headers, allowedTools, timeout, McpSearchGateway::connect, null);
+    }
+
+    McpSearchGateway(String endpoint, Map<String, String> headers, Set<String> allowedTools,
+                     Duration timeout, UsageLedger usage) {
+        this(endpoint, headers, allowedTools, timeout, McpSearchGateway::connect, usage);
     }
 
     McpSearchGateway(String endpoint, Map<String, String> headers, Set<String> allowedTools,
                      Duration timeout, ClientFactory clientFactory) {
+        this(endpoint, headers, allowedTools, timeout, clientFactory, null);
+    }
+
+    McpSearchGateway(String endpoint, Map<String, String> headers, Set<String> allowedTools,
+                     Duration timeout, ClientFactory clientFactory, UsageLedger usage) {
         this.endpoint = endpoint == null ? "" : endpoint.strip();
         this.headers = Map.copyOf(headers);
         this.allowedTools = Set.copyOf(allowedTools);
         this.timeout = timeout;
         this.clientFactory = clientFactory;
+        this.usage = usage;
     }
 
     public List<DiscoveredTool> discover() {
@@ -75,10 +87,19 @@ public class McpSearchGateway {
 
     /** Executes one fixed, read-only search tool; provider text is accepted only with a valid source URL. */
     public SearchResponse search(String query) {
-        if (endpoint.isEmpty() || !allowedTools.contains(SEARCH_TOOL))
+        return search(null, null, query);
+    }
+
+    public SearchResponse search(Long ownerId, String taskId, String query) {
+        String usageId = usage == null || ownerId == null ? null
+                : usage.start(ownerId, taskId, "MCP_SEARCH", "tavily", SEARCH_TOOL);
+        if (endpoint.isEmpty() || !allowedTools.contains(SEARCH_TOOL)) {
+            if (usageId != null) usage.failed(usageId, "MCP_NOT_CONFIGURED");
             throw new McpFailure("MCP_NOT_CONFIGURED");
+        }
         long started = System.nanoTime();
         McpClient client = null;
+        SearchResponse response;
         try {
             client = clientFactory.create(endpoint, headers, timeout);
             if (client.listTools().stream().noneMatch(tool -> SEARCH_TOOL.equals(tool.name())))
@@ -91,12 +112,14 @@ public class McpSearchGateway {
                 throw new McpFailure("MCP_UNAVAILABLE");
             var sources = parseResults(result.resultText());
             log.info("mcp search completed: sources={} durationMs={}", sources.size(), elapsedMillis(started));
-            return new SearchResponse(sources.isEmpty() ? "INSUFFICIENT_MATERIAL" : "MATCHED", sources);
+            response = new SearchResponse(sources.isEmpty() ? "INSUFFICIENT_MATERIAL" : "MATCHED", sources);
         } catch (McpFailure failure) {
+            if (usageId != null) usage.failed(usageId, failure.getMessage());
             throw failure;
         } catch (Exception failure) {
             log.warn("mcp search failed: code=MCP_UNAVAILABLE type={} durationMs={}",
                     failure.getClass().getSimpleName(), elapsedMillis(started));
+            if (usageId != null) usage.failed(usageId, "MCP_UNAVAILABLE");
             throw new McpFailure("MCP_UNAVAILABLE");
         } finally {
             if (client != null) {
@@ -107,6 +130,8 @@ public class McpSearchGateway {
                 }
             }
         }
+        if (usageId != null) usage.searchSucceeded(usageId);
+        return response;
     }
 
     private static List<SearchResult> parseResults(String text) {

@@ -1,0 +1,22 @@
+CREATE TABLE usage_calls (
+    id CHAR(36) NOT NULL,
+    owner_id BIGINT NOT NULL,
+    task_id VARCHAR(64) NOT NULL,
+    kind VARCHAR(16) NOT NULL,
+    provider VARCHAR(64) NOT NULL,
+    operation VARCHAR(32) NOT NULL,
+    status VARCHAR(16) NOT NULL,
+    input_tokens INT UNSIGNED NULL,
+    output_tokens INT UNSIGNED NULL,
+    input_rate_cny_per_million DECIMAL(18,6) NULL,
+    output_rate_cny_per_million DECIMAL(18,6) NULL,
+    call_rate_cny DECIMAL(18,6) NULL,
+    cost_cny DECIMAL(18,6) NULL,
+    error_code VARCHAR(64) NULL,
+    created_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    updated_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+    PRIMARY KEY (id),
+    INDEX ix_usage_calls_owner_created (owner_id, created_at),
+    INDEX ix_usage_calls_owner_task (owner_id, task_id),
+    CONSTRAINT fk_usage_calls_owner FOREIGN KEY (owner_id) REFERENCES users (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_as_ci;

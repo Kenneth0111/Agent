@@ -101,7 +101,8 @@ class GenerationGraph {
                 : GenerationPrompts.script(state.account(), state.savedTopic().topic(),
                         state.request().instruction().strip(), state.evidence());
         try {
-            return Map.of("prompt", prompt, "raw", model.replyJson(prompt));
+            return Map.of("prompt", prompt, "raw", model.replyJson(state.ownerId(),
+                    state.request().requestId(), prompt));
         } catch (ModelGateway.ModelFailure failure) {
             throw new StageFailure("generateDraft", failure.getMessage(), 1);
         }
@@ -116,7 +117,8 @@ class GenerationGraph {
                 try { topic = validator.topic(state.raw(), allowed); }
                 catch (ContentInvalid invalid) {
                     attempts = 2;
-                    topic = validator.topic(model.replyJson(correction(state.prompt(), state.raw(), invalid.getMessage())), allowed);
+                    topic = validator.topic(model.replyJson(state.ownerId(), state.request().requestId(),
+                            correction(state.prompt(), state.raw(), invalid.getMessage())), allowed);
                 }
                 if (!state.request().column().equals(topic.column())) throw new ContentInvalid("COLUMN_MISMATCH");
                 return Map.of("validatedTopic", topic, "attempts", attempts);
@@ -125,7 +127,8 @@ class GenerationGraph {
             try { script = validator.script(state.raw(), allowed); }
             catch (ContentInvalid invalid) {
                 attempts = 2;
-                script = validator.script(model.replyJson(correction(state.prompt(), state.raw(), invalid.getMessage())), allowed);
+                script = validator.script(model.replyJson(state.ownerId(), state.request().requestId(),
+                        correction(state.prompt(), state.raw(), invalid.getMessage())), allowed);
             }
             if (script.sourceIds().isEmpty()) throw new ContentInvalid("INSUFFICIENT_MATERIAL");
             return Map.of("validatedScript", script, "attempts", attempts);

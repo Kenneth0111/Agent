@@ -33,21 +33,38 @@ public class ModelGateway {
 
     private final ChatModel model;
     private final ObjectMapper json;
+    private final UsageLedger usage;
+    private final String provider;
 
     public ModelGateway(ChatModel model, ObjectMapper json) {
+        this(model, json, null, "model");
+    }
+
+    ModelGateway(ChatModel model, ObjectMapper json, UsageLedger usage, String provider) {
         this.model = model;
         this.json = json;
+        this.usage = usage;
+        this.provider = provider;
     }
 
     public String reply(String prompt) {
-        var text = call("reply", ChatRequest.builder().messages(UserMessage.from(prompt)).build());
+        return reply(null, null, prompt);
+    }
+
+    public String reply(Long ownerId, String taskId, String prompt) {
+        var text = call("reply", ChatRequest.builder().messages(UserMessage.from(prompt)).build(),
+                ownerId, taskId);
         if (text == null || text.isBlank()) throw new ModelFailure("MODEL_INVALID_OUTPUT");
         return text;
     }
 
     public String replyJson(String prompt) {
+        return replyJson(null, null, prompt);
+    }
+
+    public String replyJson(Long ownerId, String taskId, String prompt) {
         var text = call("replyJson", ChatRequest.builder().messages(UserMessage.from(prompt))
-                .responseFormat(ResponseFormat.JSON).build());
+                .responseFormat(ResponseFormat.JSON).build(), ownerId, taskId);
         if (text == null || text.isBlank()) throw new ModelFailure("MODEL_INVALID_OUTPUT");
         return text;
     }
@@ -55,7 +72,7 @@ public class ModelGateway {
     public InterviewDraft interviewDraft(String topic) {
         var text = call("interviewDraft", ChatRequest.builder()
                 .messages(SystemMessage.from(DRAFT_INSTRUCTION), UserMessage.from("主题：" + topic))
-                .responseFormat(ResponseFormat.JSON).build());
+                .responseFormat(ResponseFormat.JSON).build(), null, null);
         JsonNode node;
         try {
             node = json.readTree(text == null ? "" : text);
@@ -71,13 +88,18 @@ public class ModelGateway {
      */
     public String replyUsingTools(String operation, String systemPrompt, String userPrompt,
                                   List<LocalTool> tools, int maxToolRounds) {
+        return replyUsingTools(null, null, operation, systemPrompt, userPrompt, tools, maxToolRounds);
+    }
+
+    public String replyUsingTools(Long ownerId, String taskId, String operation, String systemPrompt,
+                                  String userPrompt, List<LocalTool> tools, int maxToolRounds) {
         var byName = tools.stream().collect(Collectors.toMap(LocalTool::name, Function.identity()));
         var specifications = tools.stream().map(LocalTool::specification).toList();
         List<ChatMessage> messages = new ArrayList<>(List.of(
                 SystemMessage.from(systemPrompt), UserMessage.from(userPrompt)));
         for (int round = 0; ; round++) {
             var answer = send(operation, ChatRequest.builder()
-                    .messages(messages).toolSpecifications(specifications).build()).aiMessage();
+                    .messages(messages).toolSpecifications(specifications).build(), ownerId, taskId).aiMessage();
             if (answer == null || !answer.hasToolExecutionRequests()) {
                 var text = answer == null ? null : answer.text();
                 if (text == null || text.isBlank()) throw new ModelFailure("MODEL_INVALID_OUTPUT");
@@ -112,30 +134,42 @@ public class ModelGateway {
         }
     }
 
-    private String call(String operation, ChatRequest request) {
-        var answer = send(operation, request).aiMessage();
+    private String call(String operation, ChatRequest request, Long ownerId, String taskId) {
+        var answer = send(operation, request, ownerId, taskId).aiMessage();
         return answer == null ? null : answer.text();
     }
 
-    private ChatResponse send(String operation, ChatRequest request) {
-        if (model == null) throw new ModelFailure("MODEL_NOT_CONFIGURED");
+    private ChatResponse send(String operation, ChatRequest request, Long ownerId, String taskId) {
+        if (model == null) {
+            if (usage != null && ownerId != null)
+                usage.failed(usage.start(ownerId, taskId, "MODEL", provider, operation),
+                        "MODEL_NOT_CONFIGURED");
+            throw new ModelFailure("MODEL_NOT_CONFIGURED");
+        }
         long started = System.nanoTime();
         ChatResponse response;
         for (int attempt = 0; ; attempt++) {
+            String usageId = usage == null || ownerId == null ? null
+                    : usage.start(ownerId, taskId, "MODEL", provider, operation);
             try {
                 response = model.chat(request);
-                break;
             } catch (RuntimeException failure) {
+                var code = failureCode(failure);
+                if (usageId != null) usage.failed(usageId, code);
                 if (attempt == 0 && !(failure instanceof AuthenticationException)
                         && isConnectionFailure(failure)) {
                     log.warn("model call {} connection failed before response; retrying once", operation);
                     continue;
                 }
-                var code = failureCode(failure);
                 log.warn("model call {} failed: code={} type={} durationMs={}", operation, code,
                         failure.getClass().getSimpleName(), elapsedMillis(started));
                 throw new ModelFailure(code);
             }
+            var tokens = response.tokenUsage();
+            if (usageId != null) usage.modelSucceeded(usageId,
+                    tokens == null ? null : tokens.inputTokenCount(),
+                    tokens == null ? null : tokens.outputTokenCount());
+            break;
         }
         var usage = response.tokenUsage();
         log.info("model call {} succeeded: durationMs={} inputTokens={} outputTokens={}", operation,

@@ -102,4 +102,21 @@ class ModelGatewayTest {
                 .isInstanceOf(ModelGateway.ModelFailure.class).hasMessage("MODEL_NOT_CONFIGURED");
         assertThat(provider.calls()).isZero();
     }
+
+    @Test
+    void recordsSuccessfulAndFailedProviderCallsAgainstTheOwnerAndTask() {
+        var ledger = mock(UsageLedger.class);
+        when(ledger.start(7L, "task-1", "MODEL", "test-model", "reply"))
+                .thenReturn("call-1", "call-2");
+        var gateway = new ModelGateway(ModelConfig.createModel(provider.baseUrl(), "test-only-key",
+                "test-model", Duration.ofSeconds(2)), json, ledger, "test-model");
+
+        assertThat(gateway.reply(7L, "task-1", "测试")).isEqualTo("回答示例");
+        verify(ledger).modelSucceeded("call-1", 5, 3);
+
+        provider.failWithStatus(401);
+        assertThatThrownBy(() -> gateway.reply(7L, "task-1", "测试"))
+                .isInstanceOf(ModelGateway.ModelFailure.class).hasMessage("MODEL_AUTH_FAILED");
+        verify(ledger).failed("call-2", "MODEL_AUTH_FAILED");
+    }
 }

@@ -50,12 +50,13 @@ public class ConversationService {
         var prompt = prompt(original, topic.topic().column(), request, evidence,
                 request.conversationId() == null ? List.of()
                         : content.recentInstructions(ownerId, request.conversationId()));
-        var raw = model.replyJson(prompt);
+        var raw = model.replyJson(ownerId, scriptId, prompt);
         ContentValidator.Script revised;
         try {
             revised = validated(raw, allowed);
         } catch (ContentInvalid invalid) {
-            revised = validated(model.replyJson(prompt + "\n上次结果未通过校验（" + invalid.getMessage()
+            revised = validated(model.replyJson(ownerId, scriptId,
+                    prompt + "\n上次结果未通过校验（" + invalid.getMessage()
                     + "）。只返回修正的 JSON：\n" + raw.substring(0, Math.min(raw.length(), 4000))), allowed);
         }
         return content.reviseScript(ownerId, scriptId, request.expectedVersion(), request.conversationId(),

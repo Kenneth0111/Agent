@@ -44,7 +44,7 @@ class ConversationServiceTest {
         assertThatThrownBy(() -> service.revise(7, "script-1",
                 new ConversationService.Revision(null, 2, "改口播")))
                 .isInstanceOf(ContentValidator.ContentInvalid.class).hasMessage("SCRIPT_CONFIRMED");
-        verify(model, never()).replyJson(any());
+        verify(model, never()).replyJson(eq(7L), any(), any());
     }
 
     @Test
@@ -53,7 +53,7 @@ class ConversationServiceTest {
         when(content.findTopic(7, "topic-1")).thenReturn(Optional.of(topic));
         when(materials.find(7, "m-1")).thenReturn(Optional.of(new MaterialDetail("m-1", "规范", "参考",
                 null, null, 1, "volatile 保证可见性。", "TEXT", List.of("account-1"))));
-        when(model.replyJson(any())).thenReturn("""
+        when(model.replyJson(eq(7L), eq("script-1"), any())).thenReturn("""
                 {"spokenText":"新版：正面口播解释可见性。","shootingNotes":"口播","sourceIds":["m-1"]}
                 """);
         var revised = new SavedScript("script-1", "topic-1",
@@ -67,7 +67,7 @@ class ConversationServiceTest {
 
         assertThat(result.version()).isEqualTo(2);
         var prompt = ArgumentCaptor.forClass(String.class);
-        verify(model).replyJson(prompt.capture());
+        verify(model).replyJson(eq(7L), eq("script-1"), prompt.capture());
         assertThat(prompt.getValue()).contains("改成口播", "原稿：展示 IDE 录屏", "资料 ID：m-1",
                 "问题、简答、解释、代码或演示步骤、追问");
         verify(content).reviseScript(eq(7L), eq("script-1"), eq(1), eq(null), eq("改成口播"),
@@ -86,6 +86,6 @@ class ConversationServiceTest {
                 new ConversationService.Revision("foreign-session", 1, "改口播")))
                 .isInstanceOf(ContentValidator.ContentInvalid.class).hasMessage("CONVERSATION_NOT_FOUND");
         verify(materials, never()).find(org.mockito.ArgumentMatchers.anyLong(), any());
-        verify(model, never()).replyJson(any());
+        verify(model, never()).replyJson(eq(7L), any(), any());
     }
 }

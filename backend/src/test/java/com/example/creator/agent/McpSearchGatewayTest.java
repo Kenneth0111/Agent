@@ -24,6 +24,28 @@ import static org.mockito.ArgumentMatchers.any;
 
 class McpSearchGatewayTest {
     @Test
+    void recordsSearchSuccessAndFailureForTheCallingUser() {
+        var client = mock(McpClient.class);
+        var result = mock(ToolExecutionResult.class);
+        var ledger = mock(UsageLedger.class);
+        when(client.listTools()).thenReturn(List.of(ToolSpecification.builder().name("tavily_search").build()));
+        when(client.executeTool(any())).thenReturn(result);
+        var success = "{\"results\":[{\"title\":\"Java\",\"url\":\"https://example.test/java\",\"content\":\"Java reference\"}]}";
+        var failure = "{\"error\":\"provider failure\"}";
+        when(result.resultText()).thenReturn(success, success, failure, failure);
+        when(ledger.start(7L, "task-1", "MCP_SEARCH", "tavily", "tavily_search"))
+                .thenReturn("call-1", "call-2");
+        var gateway = new McpSearchGateway("https://mcp.example.test/mcp", Map.of(),
+                Set.of("tavily_search"), Duration.ofSeconds(1), (url, headers, timeout) -> client, ledger);
+
+        assertThat(gateway.search(7L, "task-1", "Java").status()).isEqualTo("MATCHED");
+        verify(ledger).searchSucceeded("call-1");
+        assertThatThrownBy(() -> gateway.search(7L, "task-1", "Java"))
+                .isInstanceOf(McpSearchGateway.McpFailure.class).hasMessage("MCP_UNAVAILABLE");
+        verify(ledger).failed("call-2", "MCP_UNAVAILABLE");
+    }
+
+    @Test
     void blankEndpointFailsBeforeAnyNetworkOrClientCreation() {
         var gateway = new McpSearchGateway("", Map.of(), Set.of("search"), Duration.ofSeconds(1),
                 (url, headers, timeout) -> { throw new AssertionError("must not connect"); });

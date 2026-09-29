@@ -20,6 +20,8 @@ public class ContentState extends AgentState {
                 .orElseThrow(() -> new IllegalStateException("accountId is required"));
     }
 
+    public String taskId() { return this.<String>value("taskId").orElseThrow(); }
+
     public Optional<String> accountFacts() {
         return value("accountFacts");
     }

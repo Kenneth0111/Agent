@@ -34,7 +34,9 @@ public class GenerationService {
 
         var run = content.startRun(ownerId, request.accountId(), request.mode());
         try {
-            var result = graph.run(ownerId, request);
+            var tracked = new Request(request.accountId(), request.mode(), request.column(),
+                    request.instruction(), request.materialIds(), request.topicId(), request.slots(), run.id());
+            var result = graph.run(ownerId, tracked);
             return content.finishRun(ownerId, run.id(), result.resultId(), result.attempts());
         } catch (GenerationGraph.StageFailure failure) {
             return content.failRun(ownerId, run.id(), failure.getMessage(), failure.node(), failure.attempts());
@@ -94,12 +96,12 @@ public class GenerationService {
                     + (slot.instruction() == null ? "" : slot.instruction().strip());
             try {
                 var topicRequest = new Request(request.accountId(), "TOPICS", slot.column(),
-                        instruction, slot.materialIds(), null);
+                        instruction, slot.materialIds(), null, null, request.requestId());
                 var topic = stage(ownerId, run.id(), index * 2, "slot" + (index + 1) + "/TOPICS",
                         topicRequest, completed);
                 attempts += topic.attempts();
                 var scriptRequest = new Request(request.accountId(), "SCRIPT", null,
-                        instruction, null, topic.resultId());
+                        instruction, null, topic.resultId(), null, request.requestId());
                 var script = stage(ownerId, run.id(), index * 2 + 1, "slot" + (index + 1) + "/SCRIPT",
                         scriptRequest, completed);
                 attempts += script.attempts();

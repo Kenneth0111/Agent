@@ -15,9 +15,9 @@ public class ModelConfig {
                               @Value("${creator.model.api-key:}") String apiKey,
                               @Value("${creator.model.name}") String modelName,
                               @Value("${creator.model.timeout}") Duration timeout,
-                              ObjectMapper json) {
+                              ObjectMapper json, UsageLedger usage) {
         var model = apiKey.isBlank() ? null : createModel(baseUrl, apiKey, modelName, timeout);
-        return new ModelGateway(model, json);
+        return new ModelGateway(model, json, usage, modelName);
     }
 
     static ChatModel createModel(String baseUrl, String apiKey, String modelName, Duration timeout) {

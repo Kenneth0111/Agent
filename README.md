@@ -131,6 +131,8 @@ V4/V4.1/V4.2/V4.3 迁移保存选题、脚本、生成运行、失败节点、�
 
 后台扫描每分钟检查启用任务，以任务时区的星期和当地时间判断到期；到期当天稍晚启动也能领取。每账号每个当地周一日期只允许一个定时运行，数据库唯一键持久去重；Redisson 全局锁使同一时刻最多有一个任务触发付费生成，繁忙的手动触发返回 409。由于用量预算尚未接入，`GENERATION_JOBS_SCHEDULER_ENABLED` 默认 `false`，保存配置不会自行产生付费调用；设置为 `true` 并重启后端才启用自动扫描。每次触发保存生成请求快照和整周生成阶段记录；启动时核对遗留的 `RUNNING` 记录：已完成的运行补回结果；开启自动扫描后，仅从连续完成的阶段安全续跑；模型调用结果不明或自动扫描关闭时标记 `NEEDS_REVIEW`，不会重新调用模型。模型建立连接失败只自动重试一次；超时、鉴权和 HTTP 错误不会自动重试。人工处理页面尚未实现。
 
+模型与 MCP 搜索的每次外部调用单独记入用量账本，包含用户、任务 ID、供应商、状态、模型输入/输出 token、价格快照和估算费用。`GET /api/usage/summary` 查看当前登录用户的汇总，`GET /api/usage/calls` 查看最近 100 条调用；两者按用户隔离。价格通过 `.env` 中的 `MODEL_INPUT_CNY_PER_MILLION`、`MODEL_OUTPUT_CNY_PER_MILLION`、`MCP_SEARCH_CNY_PER_CALL` 配置并在重启后生效；未核实价格或供应商未提供 token 用量时，费用为 `null`、计入待核对，不显示为 0 元。失败调用可能已产生供应商费用，同样待账单核对。额度预留与阻断尚属 W5-D5。
+
 `POST /api/generations/scripts/{id}/revise` 接收 `expectedVersion`、`instruction` 和可选的 `conversationId`，返回新版本与会话 ID；同一会话的最近 3 条修改要求进入模型上下文。旧版本在 `GET /api/generations/scripts/{id}/versions` 可查，来源 ID 必须保留；旧版本号写入返回 409。所有读写从登录态限定用户，跨用户脚本或会话不会进入模型上下文。内容生成和修改会真实调用模型，请先在 `.env` 设置 DeepSeek API Key。
 
 [W3 内容联调记录](docs/qa/2026-09-25-w3-generation.md)包含 3 道 Java 题和 1 条英语跟读的核对结果。脚本时长目前只由提示词引导，正式发布前仍需人工检查。
