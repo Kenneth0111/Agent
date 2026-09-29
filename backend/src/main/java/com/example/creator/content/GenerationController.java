@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
@@ -105,12 +106,59 @@ public class GenerationController {
         } catch (ContentValidator.ContentInvalid invalid) {
             var code = invalid.getMessage();
             return ResponseEntity.status(List.of("SCRIPT_NOT_FOUND", "TOPIC_NOT_FOUND", "CONVERSATION_NOT_FOUND",
-                    "MATERIAL_NOT_FOUND").contains(code) ? 404 : 400).body(new ErrorView(code));
+                    "MATERIAL_NOT_FOUND").contains(code) ? 404 : "SCRIPT_CONFIRMED".equals(code) ? 409 : 400)
+                    .body(new ErrorView(code));
         } catch (ModelGateway.ModelFailure failure) {
             return ResponseEntity.status("MODEL_TIMEOUT".equals(failure.getMessage()) ? 504 : 503)
                     .body(new ErrorView(failure.getMessage()));
         }
     }
 
+    @PostMapping("/scripts/{id}/confirm")
+    public ResponseEntity<?> confirm(@PathVariable String id, @RequestBody(required = false) StatusInput input) {
+        return changeStatus(id, input, true);
+    }
+
+    @PostMapping("/scripts/{id}/reopen")
+    public ResponseEntity<?> reopen(@PathVariable String id, @RequestBody(required = false) StatusInput input) {
+        return changeStatus(id, input, false);
+    }
+
+    @PutMapping("/scripts/{id}")
+    public ResponseEntity<?> edit(@PathVariable String id, @RequestBody(required = false) EditInput input) {
+        if (input == null || input.expectedVersion() < 1)
+            return ResponseEntity.badRequest().body(new ErrorView("INVALID_REVISION"));
+        var original = content.findScript(currentUser.id(), id);
+        if (original.isEmpty()) return ResponseEntity.status(404).body(new ErrorView("SCRIPT_NOT_FOUND"));
+        try {
+            var script = new ContentValidator.Script(input.spokenText(), input.shootingNotes(),
+                    original.get().script().sourceIds());
+            return ResponseEntity.ok(content.reviseScript(currentUser.id(), id, input.expectedVersion(),
+                    original.get().conversationId(), "手动编辑", script));
+        } catch (ContentService.VersionConflict conflict) {
+            return ResponseEntity.status(409).body(new ErrorView("VERSION_CONFLICT"));
+        } catch (ContentValidator.ContentInvalid invalid) {
+            return ResponseEntity.status("SCRIPT_CONFIRMED".equals(invalid.getMessage()) ? 409 : 400)
+                    .body(new ErrorView(invalid.getMessage()));
+        }
+    }
+
+    private ResponseEntity<?> changeStatus(String id, StatusInput input, boolean confirm) {
+        if (input == null || input.expectedVersion() < 1)
+            return ResponseEntity.badRequest().body(new ErrorView("INVALID_VERSION"));
+        try {
+            return ResponseEntity.ok(confirm
+                    ? content.confirmScript(currentUser.id(), id, input.expectedVersion())
+                    : content.reopenScript(currentUser.id(), id, input.expectedVersion()));
+        } catch (ContentService.VersionConflict conflict) {
+            return ResponseEntity.status(409).body(new ErrorView("VERSION_CONFLICT"));
+        } catch (ContentValidator.ContentInvalid invalid) {
+            return ResponseEntity.status("SCRIPT_NOT_FOUND".equals(invalid.getMessage()) ? 404 : 409)
+                    .body(new ErrorView(invalid.getMessage()));
+        }
+    }
+
+    public record StatusInput(int expectedVersion) { }
+    public record EditInput(int expectedVersion, String spokenText, String shootingNotes) { }
     public record ErrorView(String code) { }
 }

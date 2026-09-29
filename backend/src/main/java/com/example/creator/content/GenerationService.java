@@ -47,7 +47,9 @@ public class GenerationService {
                 || !"Java 面试".equals(slots.get(0).column())
                 || !"Java 面试".equals(slots.get(1).column()) || !"英语跟读".equals(slots.get(2).column()))
             throw new ContentInvalid("INVALID_WEEK_PLAN");
-        var run = content.startRun(ownerId, request.accountId(), "WEEK_PLAN");
+        var reservation = content.reserveWeekRun(ownerId, request);
+        if (!reservation.created()) return reservation.run();
+        var run = reservation.run();
         var items = new java.util.ArrayList<ContentService.WeekItem>();
         int attempts = 0;
         for (int index = 0; index < slots.size(); index++) {
@@ -76,10 +78,15 @@ public class GenerationService {
     }
 
     public record Request(String accountId, String mode, String column, String instruction,
-                          List<String> materialIds, String topicId, List<WeekSlot> slots) implements java.io.Serializable {
+                          List<String> materialIds, String topicId, List<WeekSlot> slots,
+                          String requestId) implements java.io.Serializable {
         public Request(String accountId, String mode, String column, String instruction,
                        List<String> materialIds, String topicId) {
-            this(accountId, mode, column, instruction, materialIds, topicId, null);
+            this(accountId, mode, column, instruction, materialIds, topicId, null, null);
+        }
+        public Request(String accountId, String mode, String column, String instruction,
+                       List<String> materialIds, String topicId, List<WeekSlot> slots) {
+            this(accountId, mode, column, instruction, materialIds, topicId, slots, null);
         }
     }
     public record WeekSlot(String column, List<String> materialIds, String instruction) implements java.io.Serializable { }

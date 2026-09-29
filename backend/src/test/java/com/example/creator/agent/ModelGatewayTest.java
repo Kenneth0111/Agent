@@ -1,6 +1,11 @@
 package com.example.creator.agent;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.langchain4j.data.message.AiMessage;
+import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.model.chat.request.ChatRequest;
+import dev.langchain4j.model.chat.response.ChatResponse;
+import java.net.ConnectException;
 import java.time.Duration;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -8,6 +13,11 @@ import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 class ModelGatewayTest {
     private final ObjectMapper json = new ObjectMapper();
@@ -65,6 +75,18 @@ class ModelGatewayTest {
         assertThatThrownBy(() -> gateway(Duration.ofSeconds(2)).reply("测试"))
                 .isInstanceOf(ModelGateway.ModelFailure.class).hasMessage("MODEL_UPSTREAM_FAILED");
         assertThat(provider.calls()).isEqualTo(1);
+    }
+
+    @Test
+    void retriesAConnectionFailureOnlyOnce() {
+        var model = mock(ChatModel.class);
+        var response = mock(ChatResponse.class);
+        when(response.aiMessage()).thenReturn(AiMessage.from("连接恢复"));
+        when(model.chat(any(ChatRequest.class)))
+                .thenThrow(new RuntimeException(new ConnectException("refused")))
+                .thenReturn(response);
+        assertThat(new ModelGateway(model, json).reply("测试")).isEqualTo("连接恢复");
+        verify(model, times(2)).chat(any(ChatRequest.class));
     }
 
     @Test

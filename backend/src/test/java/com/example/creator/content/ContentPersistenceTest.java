@@ -22,6 +22,40 @@ class ContentPersistenceTest extends IntegrationTestSupport {
     @Autowired private ContentService content;
 
     @Test
+    void confirmedScriptRequiresExplicitReopeningBeforeRevision() {
+        long owner = jdbc.queryForObject("SELECT id FROM users WHERE email = ?", Long.class,
+                "creator-a@example.test");
+        long stranger = jdbc.queryForObject("SELECT id FROM users WHERE email = ?", Long.class,
+                "creator-b@example.test");
+        var account = accounts.create(owner, new AccountService.AccountInput("审阅测试", "程序员",
+                "Java 面试", List.of("Java 面试"), 2));
+        var topicId = content.saveTopic(owner, account.id(), new ContentValidator.Topic("Java 面试", "volatile",
+                "程序员", "可见性", "问题", "问答", List.of("m-1"), "资料"), Set.of("m-1"));
+        var script = new ContentValidator.Script("volatile 保证可见性。", "录屏", List.of("m-1"));
+        var scriptId = content.saveScript(owner, topicId, script, Set.of("m-1"));
+
+        var confirmed = content.confirmScript(owner, scriptId, 1);
+        assertThat(confirmed.status()).isEqualTo("CONFIRMED");
+        assertThat(confirmed.version()).isEqualTo(2);
+        assertThatThrownBy(() -> content.confirmScript(owner, scriptId, 1))
+                .isInstanceOf(ContentService.VersionConflict.class);
+        assertThatThrownBy(() -> content.reviseScript(owner, scriptId, 2, null, "改写", script))
+                .isInstanceOf(ContentValidator.ContentInvalid.class).hasMessage("SCRIPT_CONFIRMED");
+        var candidateId = content.saveScript(owner, topicId,
+                new ContentValidator.Script("新候选稿。", "录屏", List.of("m-1")), Set.of("m-1"));
+        assertThat(candidateId).isNotEqualTo(scriptId);
+        assertThat(content.findScript(owner, scriptId)).get().extracting(ContentService.SavedScript::status)
+                .isEqualTo("CONFIRMED");
+        assertThatThrownBy(() -> content.reopenScript(stranger, scriptId, 2))
+                .isInstanceOf(ContentValidator.ContentInvalid.class).hasMessage("SCRIPT_NOT_FOUND");
+
+        var reopened = content.reopenScript(owner, scriptId, 2);
+        assertThat(reopened.status()).isEqualTo("DRAFT");
+        assertThat(reopened.version()).isEqualTo(3);
+        assertThat(content.reviseScript(owner, scriptId, 3, null, "改写", script).version()).isEqualTo(4);
+    }
+
+    @Test
     void validTopicAndScriptPersistWhileForeignReferencesAreRejected() {
         long owner = jdbc.queryForObject("SELECT id FROM users WHERE email = ?", Long.class,
                 "creator-a@example.test");
@@ -166,6 +200,34 @@ class ContentPersistenceTest extends IntegrationTestSupport {
                 .contains(weekId);
         assertThat(content.findWeekPlan(stranger, weekId)).isEmpty();
         assertThatThrownBy(() -> content.saveWeekPlan(stranger, account.id(), items))
+                .isInstanceOf(ContentValidator.ContentInvalid.class).hasMessage("ACCOUNT_NOT_FOUND");
+    }
+
+    @Test
+    void weekRequestIdReturnsOneRunAndRejectsDifferentPayload() {
+        long owner = jdbc.queryForObject("SELECT id FROM users WHERE email = ?", Long.class,
+                "creator-a@example.test");
+        long stranger = jdbc.queryForObject("SELECT id FROM users WHERE email = ?", Long.class,
+                "creator-b@example.test");
+        var account = accounts.create(owner, new AccountService.AccountInput("幂等周草稿", "程序员",
+                "Java 和英语", List.of("Java 面试", "英语跟读"), 3));
+        var slots = List.of(new GenerationService.WeekSlot("Java 面试", List.of("m-1"), "第一条"),
+                new GenerationService.WeekSlot("Java 面试", List.of("m-2"), "第二条"),
+                new GenerationService.WeekSlot("英语跟读", List.of("m-3"), "跟读"));
+        var request = new GenerationService.Request(account.id(), "WEEK_PLAN", null, "本周内容",
+                null, null, slots, "123e4567-e89b-12d3-a456-426614174003");
+
+        var first = content.reserveWeekRun(owner, request);
+        assertThat(first.created()).isTrue();
+        content.finishRun(owner, first.run().id(), "draft-batch-1", 6);
+        var duplicate = content.reserveWeekRun(owner, request);
+        assertThat(duplicate.created()).isFalse();
+        assertThat(duplicate.run().id()).isEqualTo(first.run().id());
+        assertThat(duplicate.run().resultId()).isEqualTo("draft-batch-1");
+        assertThatThrownBy(() -> content.reserveWeekRun(owner, new GenerationService.Request(account.id(),
+                "WEEK_PLAN", null, "另一组内容", null, null, slots, request.requestId())))
+                .isInstanceOf(ContentValidator.ContentInvalid.class).hasMessage("REQUEST_ID_REUSED");
+        assertThatThrownBy(() -> content.reserveWeekRun(stranger, request))
                 .isInstanceOf(ContentValidator.ContentInvalid.class).hasMessage("ACCOUNT_NOT_FOUND");
     }
 }

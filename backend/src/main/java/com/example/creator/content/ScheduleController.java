@@ -1,0 +1,138 @@
+package com.example.creator.content;
+
+import com.example.creator.auth.CurrentUser;
+import java.time.LocalDate;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+
+@RestController
+@RequestMapping("/api/schedules")
+public class ScheduleController {
+    private final CurrentUser currentUser;
+    private final ScheduleService schedules;
+    private final ScheduleRegenerationService regeneration;
+
+    ScheduleController(CurrentUser currentUser, ScheduleService schedules,
+                       ScheduleRegenerationService regeneration) {
+        this.currentUser = currentUser;
+        this.schedules = schedules;
+        this.regeneration = regeneration;
+    }
+
+    @PostMapping("/weeks")
+    public ResponseEntity<?> create(@RequestBody(required = false) WeekInput input) {
+        try {
+            if (input == null) return ResponseEntity.badRequest().body(new ErrorView("INVALID_WEEK_START"));
+            return ResponseEntity.status(201).body(schedules.create(currentUser.id(), input.accountId(), input.weekStart()));
+        } catch (ContentValidator.ContentInvalid invalid) {
+            return failure(invalid);
+        }
+    }
+
+    @GetMapping("/weeks")
+    public ResponseEntity<?> week(@RequestParam String accountId, @RequestParam LocalDate weekStart) {
+        try {
+            return schedules.findByAccountAndStart(currentUser.id(), accountId, weekStart)
+                    .<ResponseEntity<?>>map(ResponseEntity::ok)
+                    .orElseGet(() -> ResponseEntity.notFound().build());
+        } catch (ContentValidator.ContentInvalid invalid) {
+            return failure(invalid);
+        }
+    }
+
+    @PutMapping("/items/{id}/date")
+    public ResponseEntity<?> move(@PathVariable String id, @RequestBody(required = false) DateInput input) {
+        try {
+            if (input == null) return ResponseEntity.badRequest().body(new ErrorView("INVALID_SCHEDULE_DATE"));
+            return ResponseEntity.ok(schedules.move(currentUser.id(), id, input.expectedVersion(), input.scheduledDate()));
+        } catch (ContentService.VersionConflict conflict) {
+            return ResponseEntity.status(409).body(new ErrorView("VERSION_CONFLICT"));
+        } catch (ContentValidator.ContentInvalid invalid) {
+            return failure(invalid);
+        }
+    }
+
+    @PutMapping("/items/{id}/column")
+    public ResponseEntity<?> column(@PathVariable String id, @RequestBody(required = false) ColumnInput input) {
+        if (input == null || input.expectedVersion() < 1)
+            return ResponseEntity.badRequest().body(new ErrorView("INVALID_COLUMN"));
+        try {
+            return ResponseEntity.ok(schedules.changeColumn(currentUser.id(), id, input.expectedVersion(),
+                    input.column()));
+        } catch (ContentService.VersionConflict conflict) {
+            return ResponseEntity.status(409).body(new ErrorView("VERSION_CONFLICT"));
+        } catch (ContentValidator.ContentInvalid invalid) {
+            return failure(invalid);
+        }
+    }
+
+    @PostMapping("/weeks/{id}/attach-batch")
+    public ResponseEntity<?> attach(@PathVariable String id, @RequestBody(required = false) BatchInput input) {
+        if (input == null || input.batchId() == null || input.batchId().isBlank())
+            return ResponseEntity.badRequest().body(new ErrorView("WEEK_PLAN_NOT_FOUND"));
+        try {
+            return ResponseEntity.ok(schedules.attachBatch(currentUser.id(), id, input.batchId()));
+        } catch (ContentService.VersionConflict conflict) {
+            return ResponseEntity.status(409).body(new ErrorView("VERSION_CONFLICT"));
+        } catch (ContentValidator.ContentInvalid invalid) {
+            return failure(invalid);
+        }
+    }
+
+    @PostMapping("/items/{id}/regenerate")
+    public ResponseEntity<?> regenerate(@PathVariable String id,
+                                        @RequestBody(required = false) ScheduleRegenerationService.Input input) {
+        try {
+            return ResponseEntity.ok(regeneration.regenerate(currentUser.id(), id, input));
+        } catch (ContentService.VersionConflict conflict) {
+            return ResponseEntity.status(409).body(new ErrorView("VERSION_CONFLICT"));
+        } catch (ContentValidator.ContentInvalid invalid) {
+            return failure(invalid);
+        } catch (GenerationGraph.StageFailure failed) {
+            var code = failed.getMessage();
+            var status = "MODEL_TIMEOUT".equals(code) ? 504 : code.startsWith("MODEL_") ? 503 : 400;
+            return ResponseEntity.status(status).body(new StageErrorView(code, failed.node()));
+        }
+    }
+
+    @PutMapping("/items/{id}/publication")
+    public ResponseEntity<?> publication(@PathVariable String id,
+                                         @RequestBody(required = false) PublicationInput input) {
+        if (input == null || input.expectedVersion() < 1 || input.published() == null)
+            return ResponseEntity.badRequest().body(new ErrorView("INVALID_PUBLICATION"));
+        try {
+            return ResponseEntity.ok(schedules.setPublication(currentUser.id(), id, input.expectedVersion(),
+                    input.published(), input.publicationUrl(), input.externalWorkId()));
+        } catch (ContentService.VersionConflict conflict) {
+            return ResponseEntity.status(409).body(new ErrorView("VERSION_CONFLICT"));
+        } catch (ContentValidator.ContentInvalid invalid) {
+            return failure(invalid);
+        }
+    }
+
+    private ResponseEntity<ErrorView> failure(ContentValidator.ContentInvalid invalid) {
+        var code = invalid.getMessage();
+        return ResponseEntity.status("ACCOUNT_NOT_FOUND".equals(code) || "PLAN_ITEM_NOT_FOUND".equals(code)
+                || "PLAN_NOT_FOUND".equals(code) || "WEEK_PLAN_NOT_FOUND".equals(code)
+                || "TOPIC_NOT_FOUND".equals(code) || "SCRIPT_NOT_FOUND".equals(code)
+                ? 404 : "PLAN_ITEM_OCCUPIED".equals(code) || "SCRIPT_CONFIRMED".equals(code)
+                || "SCRIPT_NOT_CONFIRMED".equals(code)
+                ? 409 : 400).body(new ErrorView(code));
+    }
+
+    public record WeekInput(String accountId, LocalDate weekStart) { }
+    public record DateInput(int expectedVersion, LocalDate scheduledDate) { }
+    public record ColumnInput(int expectedVersion, String column) { }
+    public record BatchInput(String batchId) { }
+    public record PublicationInput(int expectedVersion, Boolean published,
+                                   String publicationUrl, String externalWorkId) { }
+    public record ErrorView(String code) { }
+    public record StageErrorView(String code, String failedNode) { }
+}

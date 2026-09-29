@@ -3,7 +3,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import GenerationPage from './GenerationPage.vue'
 import { postJsonWithCsrf, request } from '../api/http'
 
-vi.mock('../api/http', () => ({ request: vi.fn(), postJsonWithCsrf: vi.fn() }))
+vi.mock('../api/http', async importOriginal => ({ ...await importOriginal<typeof import('../api/http')>(),
+  request: vi.fn(), postJsonWithCsrf: vi.fn() }))
 
 const account = { id: 'account-1', name: '技术账号' }
 const material = { id: 'material-1', title: 'Java 21 资料', sourceUrl: null, accountIds: ['account-1'] }
@@ -24,6 +25,57 @@ beforeEach(() => {
 })
 
 describe('content generation page', () => {
+  it('ignores late topic and week responses after switching accounts', async () => {
+    let finishTopics!: (value: unknown) => void
+    let finishWeeks!: (value: unknown) => void
+    const otherTopic = { ...topic, id: 'topic-2', accountId: 'account-2',
+      topic: { ...topic.topic, title: '新账号选题' } }
+    vi.mocked(request).mockImplementation(async path => {
+      if (path === '/api/accounts') return [account, { id: 'account-2', name: '其他账号' }]
+      if (path === '/api/materials') return [material]
+      if (path === '/api/generations/topics?accountId=account-1') return new Promise(resolve => { finishTopics = resolve })
+      if (path === '/api/generations/week-plans?accountId=account-1') return new Promise(resolve => { finishWeeks = resolve })
+      if (path === '/api/generations/topics?accountId=account-2') return [otherTopic]
+      return []
+    })
+    const wrapper = mount(GenerationPage)
+    await flushPromises()
+    await wrapper.get('#generation-account').setValue('account-2')
+    await flushPromises()
+    finishTopics([topic])
+    finishWeeks([{ id: 'week-1', accountId: 'account-1', status: 'DRAFT',
+      items: [{ column: 'Java 面试', topicId: 'topic-1', scriptId: 'script-1' }] }])
+    await flushPromises()
+    expect(wrapper.get('#generation-topic').text()).toContain('新账号选题')
+    expect(wrapper.get('#generation-topic').text()).not.toContain('volatile 快问快答')
+    expect(wrapper.findAll('.week-result')).toHaveLength(0)
+    wrapper.unmount()
+  })
+
+  it('keeps the selected topic script when an older script request finishes late', async () => {
+    let finishOld!: (value: unknown) => void
+    const makeScript = (id: string, topicId: string, spokenText: string) => ({ id, topicId,
+      script: { spokenText, shootingNotes: '口播', sourceIds: ['material-1'] },
+      status: 'DRAFT', version: 1, conversationId: null })
+    vi.mocked(request).mockImplementation(async path => {
+      if (path === '/api/accounts') return [account]
+      if (path === '/api/materials') return [material]
+      if (path.startsWith('/api/generations/topics?')) return [topic, { ...topic, id: 'topic-2' }]
+      if (path === '/api/generations/scripts?topicId=topic-1') return new Promise(resolve => { finishOld = resolve })
+      if (path === '/api/generations/scripts?topicId=topic-2') return [makeScript('script-2', 'topic-2', '新选题脚本')]
+      return []
+    })
+    const wrapper = mount(GenerationPage)
+    await flushPromises()
+    await wrapper.get('#generation-topic').setValue('topic-2')
+    await flushPromises()
+    finishOld([makeScript('script-1', 'topic-1', '旧选题脚本')])
+    await flushPromises()
+    expect(wrapper.get('.script').text()).toContain('新选题脚本')
+    expect(wrapper.get('.script').text()).not.toContain('旧选题脚本')
+    wrapper.unmount()
+  })
+
   it('loads saved drafts after mount and shows their source', async () => {
     const wrapper = mount(GenerationPage)
     await flushPromises()
@@ -45,6 +97,21 @@ describe('content generation page', () => {
     resolve({ id: 'run-1', accountId: 'account-1', mode: 'TOPICS', status: 'SUCCEEDED', resultId: 'topic-1', errorCode: null })
     await flushPromises()
     expect(wrapper.text()).toContain('已保存草稿')
+    wrapper.unmount()
+  })
+
+  it('shows a missing-evidence failure without claiming a saved draft', async () => {
+    vi.mocked(postJsonWithCsrf).mockResolvedValue({ id: 'run-failed', accountId: 'account-1',
+      mode: 'TOPICS', status: 'FAILED', resultId: null,
+      errorCode: 'INSUFFICIENT_MATERIAL', failedNode: 'retrieveEvidence' })
+    const wrapper = mount(GenerationPage)
+    await flushPromises()
+    await wrapper.get('#generation-instruction').setValue('找一份不存在的资料')
+    await wrapper.findAll('button').find(button => button.text() === '生成选题')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[role="alert"]').text()).toContain('缺少可引用的资料')
+    expect(wrapper.get('[role="status"]').text()).toContain('检索资料失败')
+    expect(wrapper.text()).not.toContain('已保存草稿。')
     wrapper.unmount()
   })
 
@@ -101,6 +168,39 @@ describe('content generation page', () => {
     wrapper.unmount()
   })
 
+  it('retries an uncertain weekly request with the same id and changes id for new content', async () => {
+    vi.mocked(request).mockImplementation(async path => {
+      if (path === '/api/accounts') return [account]
+      if (path === '/api/materials') return [material,
+        { ...material, id: 'material-2' }, { ...material, id: 'material-3' }]
+      if (path.startsWith('/api/generations/topics?')) return [topic]
+      if (path.startsWith('/api/generations/scripts?')) return []
+      if (path.startsWith('/api/generations/week-plans?')) return []
+      throw new Error(`Unexpected path ${path}`)
+    })
+    vi.mocked(postJsonWithCsrf).mockRejectedValue(new Error('Connection dropped'))
+    const wrapper = mount(GenerationPage)
+    await flushPromises()
+    await wrapper.get('#generation-instruction').setValue('本周三条内容')
+    await wrapper.get('#week-java-1').setValue('material-1')
+    await wrapper.get('#week-java-2').setValue('material-2')
+    await wrapper.get('#week-english').setValue('material-3')
+    const generate = () => wrapper.findAll('button').find(button => button.text() === '生成整周草稿')!.trigger('click')
+    await generate()
+    await flushPromises()
+    await generate()
+    await flushPromises()
+    const bodies = vi.mocked(postJsonWithCsrf).mock.calls.map(call => call[1] as { requestId: string })
+    expect(bodies[0].requestId).toMatch(/^[0-9a-f-]{36}$/)
+    expect(bodies[1].requestId).toBe(bodies[0].requestId)
+    await wrapper.get('#generation-instruction').setValue('另一组内容')
+    await generate()
+    await flushPromises()
+    expect((vi.mocked(postJsonWithCsrf).mock.calls[2][1] as { requestId: string }).requestId)
+      .not.toBe(bodies[0].requestId)
+    wrapper.unmount()
+  })
+
   it('reloads a saved week and opens its selected script with a source after refresh', async () => {
     const englishTopic = { ...topic, id: 'topic-3', topic: { ...topic.topic,
       column: '英语跟读', title: '原创短句跟读', sourceIds: ['material-3'] } }
@@ -125,6 +225,26 @@ describe('content generation page', () => {
     expect(wrapper.text()).toContain('Small steps can build lasting habits.')
     expect(wrapper.text()).toContain('原创英语短文')
     expect(vi.mocked(request)).toHaveBeenCalledWith('/api/generations/scripts?topicId=topic-3')
+    wrapper.unmount()
+  })
+
+  it('shows confirmed scripts as confirmed and prevents a revision from this page', async () => {
+    const confirmed = { id: 'script-1', topicId: 'topic-1', script: {
+      spokenText: '已确认口播', shootingNotes: '口播', sourceIds: ['material-1'] },
+    status: 'CONFIRMED', version: 3, conversationId: null }
+    vi.mocked(request).mockImplementation(async path => {
+      if (path === '/api/accounts') return [account]
+      if (path === '/api/materials') return [material]
+      if (path.startsWith('/api/generations/topics?')) return [topic]
+      if (path.startsWith('/api/generations/scripts?')) return [confirmed]
+      if (path.startsWith('/api/generations/week-plans?')) return []
+      throw new Error(`Unexpected path ${path}`)
+    })
+    const wrapper = mount(GenerationPage)
+    await flushPromises()
+    expect(wrapper.get('.script').text()).toContain('已确认脚本 · 版本 3')
+    expect(wrapper.get('#revision-script-1').attributes('disabled')).toBeDefined()
+    expect(wrapper.findAll('button').find(button => button.text() === '保存新版本')?.attributes('disabled')).toBeDefined()
     wrapper.unmount()
   })
 })

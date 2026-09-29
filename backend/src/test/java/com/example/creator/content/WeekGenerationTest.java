@@ -25,7 +25,8 @@ class WeekGenerationTest {
     @Test
     void weeklyRunProducesTwoJavaAndOneEnglishDraftOnlyAfterAllSixStagesSucceed() {
         var run = new GenerationRun("run-1", "account-1", "WEEK_PLAN", "RUNNING", 0, null, null);
-        when(content.startRun(7, "account-1", "WEEK_PLAN")).thenReturn(run);
+        when(content.reserveWeekRun(eq(7L), any()))
+                .thenReturn(new ContentService.RunReservation(run, true));
         when(graph.run(eq(7L), any())).thenReturn(
                 new GenerationGraph.Result("topic-1", 1), new GenerationGraph.Result("script-1", 1),
                 new GenerationGraph.Result("topic-2", 1), new GenerationGraph.Result("script-2", 1),
@@ -39,7 +40,7 @@ class WeekGenerationTest {
                 new GenerationService.WeekSlot("英语跟读", List.of("m-3"), "断句"));
 
         var result = service.generate(7, new GenerationService.Request("account-1", "WEEK_PLAN", null,
-                "本周三条短视频", null, null, slots));
+                "本周三条短视频", null, null, slots, "123e4567-e89b-12d3-a456-426614174000"));
 
         assertThat(result.resultId()).isEqualTo("week-1");
         var requests = ArgumentCaptor.forClass(GenerationService.Request.class);
@@ -57,8 +58,9 @@ class WeekGenerationTest {
 
     @Test
     void failingSecondSlotNamesTheFailedNodeAndDoesNotSaveAWeek() {
-        when(content.startRun(7, "account-1", "WEEK_PLAN"))
-                .thenReturn(new GenerationRun("run-2", "account-1", "WEEK_PLAN", "RUNNING", 0, null, null));
+        when(content.reserveWeekRun(eq(7L), any()))
+                .thenReturn(new ContentService.RunReservation(
+                        new GenerationRun("run-2", "account-1", "WEEK_PLAN", "RUNNING", 0, null, null), true));
         when(graph.run(eq(7L), any())).thenReturn(new GenerationGraph.Result("topic-1", 1),
                 new GenerationGraph.Result("script-1", 1))
                 .thenThrow(new GenerationGraph.StageFailure("retrieveEvidence", "MATERIAL_NOT_FOUND", 0));
@@ -71,9 +73,27 @@ class WeekGenerationTest {
 
         var result = new GenerationService(content, graph).generate(7,
                 new GenerationService.Request("account-1", "WEEK_PLAN", null,
-                        "本周三条短视频", null, null, slots));
+                "本周三条短视频", null, null, slots, "123e4567-e89b-12d3-a456-426614174001"));
 
         assertThat(result.failedNode()).isEqualTo("slot2/retrieveEvidence");
         verify(content, never()).saveWeekPlan(eq(7L), eq("account-1"), any());
+    }
+
+    @Test
+    void duplicateWeekRequestReturnsItsExistingRunWithoutCallingTheGraph() {
+        var existing = new GenerationRun("run-3", "account-1", "WEEK_PLAN", "SUCCEEDED", 6,
+                "week-3", null);
+        when(content.reserveWeekRun(eq(7L), any()))
+                .thenReturn(new ContentService.RunReservation(existing, false));
+        var slots = List.of(new GenerationService.WeekSlot("Java 面试", List.of("m-1"), "并发"),
+                new GenerationService.WeekSlot("Java 面试", List.of("m-2"), "集合"),
+                new GenerationService.WeekSlot("英语跟读", List.of("m-3"), "断句"));
+
+        var result = new GenerationService(content, graph).generate(7,
+                new GenerationService.Request("account-1", "WEEK_PLAN", null,
+                        "本周三条短视频", null, null, slots, "123e4567-e89b-12d3-a456-426614174002"));
+
+        assertThat(result).isEqualTo(existing);
+        verify(graph, never()).run(eq(7L), any());
     }
 }

@@ -2,7 +2,7 @@
 
 一个逐步开发中的 Java 内容创作与运营 Agent。目标是支持资料检索、选题、脚本、周排期及基于真实数据的复盘。
 
-当前已支持邀请注册、登录、按用户隔离的内容账号与资料、个人资料优先检索、Java 面试及英语跟读选题/脚本生成、整周草稿和定向修改。开发环境已用 DeepSeek 完成真实内容联调。抖音指标接入、周日历及自动运行仍在后续计划中。
+当前已支持邀请注册、登录、按用户隔离的内容账号与资料、个人资料优先检索、Java 面试及英语跟读选题/脚本生成、整周草稿、定向修改和周计划排期。开发环境已用 DeepSeek 完成真实内容联调。抖音指标接入及自动运行仍在后续计划中。
 
 ## 本地环境
 
@@ -57,6 +57,16 @@ npm --prefix frontend run dev
 `POST /api/auth/register` 同样需要 CSRF token，提交 JSON 的 `invitationCode`、`email`、`displayName` 和至少 12 位的 `password`。邀请码只保存 SHA-256 摘要，注册通过单条条件更新原子占用邀请码，并在同一事务创建用户：无效、过期、已用、重复邮箱和格式错误均返回 `REGISTRATION_REJECTED`，不会泄露邀请码或邮箱是否存在。前端注册成功后要求重新登录，不自动创建会话。
 
 ## 验证
+
+周排期接口：`POST /api/schedules/weeks` 接收 `accountId` 与周一日期 `weekStart`（`YYYY-MM-DD`），为账号创建该周排期；同一账号同一周再次提交返回原排期。`GET /api/schedules/weeks?accountId=...&weekStart=...` 读取该周。`PUT /api/schedules/items/{id}/date` 接收 `expectedVersion` 与 `scheduledDate` 修改发布日期；`PUT /api/schedules/items/{id}/column` 接收 `expectedVersion` 与 `column` 修改尚未关联草稿的栏目。日期按 `Asia/Shanghai` 的本地日历解释，只能落在所属周；版本冲突返回 409。`POST /api/schedules/weeks/{id}/attach-batch` 接收 `batchId`，把同账号、条数与栏目一致的整周草稿关联到空计划项；相同批次重复关联不会重复写入，也不会覆盖其他草稿。
+
+脚本确认接口：`POST /api/generations/scripts/{id}/confirm` 接收 `expectedVersion`，将待审阅草稿标为 `CONFIRMED`；`POST /api/generations/scripts/{id}/reopen` 用相同字段显式重新开放编辑。两种操作都会递增版本，旧版本返回 409；确认后的修改请求在调用模型前被拒绝。再次生成脚本会保存新的候选稿，不覆盖已有确认稿。
+
+周计划页面可按账号和周查看计划项，关联整周草稿，修改日期、栏目和脚本，并确认或重新开放脚本。`PUT /api/generations/scripts/{id}` 接收 `expectedVersion`、`spokenText`、`shootingNotes` 保存人工修改，保留原始资料引用及版本历史；已确认脚本须先重新开放。页面在切换账号或周次前提示未保存修改。
+
+整周生成请求 `POST /api/generations` 的 `WEEK_PLAN` 模式须附带 UUID `requestId`；同一用户使用相同标识及内容重试，会返回原生成运行而不再次调用模型；标识相同但内容不同返回 `REQUEST_ID_REUSED`。页面在网络失败后保留本次请求标识供重试，修改生成条件则换用新标识。`POST /api/schedules/items/{id}/regenerate` 接收 `expectedVersion`、`instruction`、`materialIds`，只为选中计划项生成新选题与脚本，并在版本一致时替换其引用；已确认脚本会在模型调用前被拒绝。其它计划项及旧草稿保留。
+
+发布记录由用户手动填写，不会调用抖音发布接口。`PUT /api/schedules/items/{id}/publication` 接收 `expectedVersion`、`published`、`publicationUrl`、`externalWorkId`；标记已发布时至少填写 HTTP(S) 作品链接或作品 ID，且关联脚本须已确认。已发布的脚本须先取消发布标记，才能重新开放编辑。取消标记会清除链接、作品 ID 和发布时间，但保留计划、选题与脚本引用。
 
 ```powershell
 mvn -f backend/pom.xml test
@@ -113,7 +123,11 @@ V4/V4.1/V4.2/V4.3 迁移保存选题、脚本、生成运行、失败节点、�
 
 登录后在“内容生成”选择账号、栏目和最多 3 份参考资料，输入要求并生成选题；选择已保存选题后可生成脚本。没有匹配资料时允许保存标注“待核实”的选题，但不能生成无依据的脚本。`POST /api/generations` 使用 `mode=TOPICS` 或 `SCRIPT`，返回运行记录；`GET /api/generations/{id}` 查询运行。`GET /api/generations/topics?accountId=...` 和 `GET /api/generations/scripts?topicId=...` 让刷新页面后仍能读取草稿。
 
-`POST /api/generations` 的 `mode=WEEK_PLAN` 接收固定 3 个 `slots`（前两条 `Java 面试`，第三条 `英语跟读`），每条指定参考 `materialIds`；成功后产生 3 组选题与脚本及一个整周草稿 ID。`GET /api/generations/week-plans?accountId=...` 与 `GET /api/generations/week-plans/{id}` 可读取。整周生成目前为同步串行调用；若中途失败，已完成的单条草稿仍保留，整周草稿不会保存，重试可能产生重复单条草稿。正式用于定时运行前需加入请求幂等和断点续跑。
+`POST /api/generations` 的 `mode=WEEK_PLAN` 接收固定 3 个 `slots`（前两条 `Java 面试`，第三条 `英语跟读`），每条指定参考 `materialIds`；成功后产生 3 组选题与脚本及一个整周草稿 ID。`GET /api/generations/week-plans?accountId=...` 与 `GET /api/generations/week-plans/{id}` 可读取。整周生成目前为同步串行调用；请求带 UUID `requestId` 时，同一用户、同一标识和相同内容的重复提交返回原运行，不再调用模型；同一标识配不同内容被拒绝。若中途失败，已完成的单条草稿仍保留，整周草稿不会保存；断点续跑尚未实现。
+
+周生成任务配置由 `PUT /api/generation-jobs/accounts/{accountId}` 保存，每个用户的每个账号一份。请求包含 `dayOfWeek`（周一为 1）、`localTime`（如 `09:00`）、IANA `timeZone`（如 `Asia/Shanghai`）、`enabled`、`instruction` 和与整周生成相同的 3 个 `slots`。`GET /api/generation-jobs/accounts/{accountId}` 读取配置；`POST /api/generation-jobs/{id}/trigger` 手动触发，`GET /api/generation-jobs/{id}/triggers` 读取最近 50 条触发记录，记录所属账号、来源、状态与生成运行 ID。手动触发会调用付费模型；即使任务停用也可手动触发。
+
+后台扫描每分钟检查启用任务，以任务时区的星期和当地时间判断到期；到期当天稍晚启动也能领取。每账号每个当地周一日期只允许一个定时运行，数据库唯一键持久去重；Redisson 全局锁使同一时刻最多有一个任务触发付费生成，繁忙的手动触发返回 409。由于用量预算尚未接入，`GENERATION_JOBS_SCHEDULER_ENABLED` 默认 `false`，保存配置不会自行产生付费调用；设置为 `true` 并重启后端才启用自动扫描。每次触发保存生成请求快照，启动时核对遗留的 `RUNNING` 记录：已完成的生成运行会补回结果，无法判断模型调用结果的记录转为 `NEEDS_REVIEW`，不会自动重试。模型建立连接失败只自动重试一次；超时、鉴权和 HTTP 错误不会自动重试。图节点级 checkpoint 和人工处理页面尚未实现。
 
 `POST /api/generations/scripts/{id}/revise` 接收 `expectedVersion`、`instruction` 和可选的 `conversationId`，返回新版本与会话 ID；同一会话的最近 3 条修改要求进入模型上下文。旧版本在 `GET /api/generations/scripts/{id}/versions` 可查，来源 ID 必须保留；旧版本号写入返回 409。所有读写从登录态限定用户，跨用户脚本或会话不会进入模型上下文。内容生成和修改会真实调用模型，请先在 `.env` 设置 DeepSeek API Key。
 

@@ -8,7 +8,7 @@ interface Topic { id: string; accountId: string; topic: { column: string; title:
 interface Script { id: string; topicId: string; script: { spokenText: string; shootingNotes: string; sourceIds: string[] }; status: string; version: number; conversationId: string | null }
 interface ScriptVersion { version: number; script: { spokenText: string; shootingNotes: string; sourceIds: string[] }; instruction: string }
 interface WeekPlan { id: string; accountId: string; status: string; items: { column: string; topicId: string; scriptId: string }[] }
-interface Run { id: string; accountId: string; mode: string; status: 'SUCCEEDED' | 'FAILED'; resultId: string | null; errorCode: string | null; failedNode?: string | null }
+interface Run { id: string; accountId: string; mode: string; status: 'RUNNING' | 'SUCCEEDED' | 'FAILED'; resultId: string | null; errorCode: string | null; failedNode?: string | null }
 
 const accounts = ref<Account[]>([])
 const materials = ref<Material[]>([])
@@ -26,6 +26,10 @@ const histories = ref<Record<string, ScriptVersion[]>>({})
 const error = ref('')
 const run = ref<Run | null>(null)
 const pending = ref(false)
+let weekRequest: { signature: string; id: string } | null = null
+let topicsRequest = 0
+let scriptsRequest = 0
+let weeksRequest = 0
 const selectedTopic = computed(() => topics.value.find(topic => topic.id === topicId.value))
 const availableMaterials = computed(() => materials.value.filter(material => material.accountIds.length === 0 || material.accountIds.includes(accountId.value)))
 
@@ -53,7 +57,7 @@ function validScript(value: unknown): value is Script {
 }
 function validRun(value: unknown): value is Run {
   return typeof value === 'object' && value !== null && 'status' in value && 'id' in value
-    && (value.status === 'SUCCEEDED' || value.status === 'FAILED') && typeof value.id === 'string'
+    && (value.status === 'RUNNING' || value.status === 'SUCCEEDED' || value.status === 'FAILED') && typeof value.id === 'string'
 }
 function validWeek(value: unknown): value is WeekPlan {
   return typeof value === 'object' && value !== null && 'id' in value && 'accountId' in value
@@ -76,37 +80,43 @@ async function load() {
 }
 
 async function loadTopics() {
+  const currentRequest = ++topicsRequest
   topics.value = []
   topicId.value = ''
   materialIds.value = []
   if (!accountId.value) return
   try {
     const result = await request(`/api/generations/topics?accountId=${encodeURIComponent(accountId.value)}`)
+    if (currentRequest !== topicsRequest) return
     if (!Array.isArray(result) || !result.every(validTopic)) throw new Error('Invalid topics')
     topics.value = result
     topicId.value = result[0]?.id ?? ''
-  } catch { error.value = '暂时无法读取已保存的选题。' }
+  } catch { if (currentRequest === topicsRequest) error.value = '暂时无法读取已保存的选题。' }
 }
 
 async function loadScripts() {
+  const currentRequest = ++scriptsRequest
   scripts.value = []
   if (!topicId.value) return
   try {
     const result = await request(`/api/generations/scripts?topicId=${encodeURIComponent(topicId.value)}`)
+    if (currentRequest !== scriptsRequest) return
     if (!Array.isArray(result) || !result.every(validScript)) throw new Error('Invalid scripts')
     scripts.value = result
-  } catch { error.value = '暂时无法读取已保存的脚本。' }
+  } catch { if (currentRequest === scriptsRequest) error.value = '暂时无法读取已保存的脚本。' }
 }
 
 async function loadWeeks() {
+  const currentRequest = ++weeksRequest
   weekPlans.value = []
   weekMaterials.value = { java1: '', java2: '', english: '' }
   if (!accountId.value) return
   try {
     const result = await request(`/api/generations/week-plans?accountId=${encodeURIComponent(accountId.value)}`)
+    if (currentRequest !== weeksRequest) return
     if (!Array.isArray(result) || !result.every(validWeek)) throw new Error('Invalid week drafts')
     weekPlans.value = result
-  } catch { error.value = '暂时无法读取已保存的整周草稿。' }
+  } catch { if (currentRequest === weeksRequest) error.value = '暂时无法读取已保存的整周草稿。' }
 }
 
 function source(id: string) { return materials.value.find(material => material.id === id) }
@@ -118,7 +128,8 @@ function failureMessage(code: string | null) {
     MATERIAL_NOT_FOUND: '所选资料已不可用或不属于当前账号。', TOPIC_NOT_FOUND: '选题已不可用。',
     SCRIPT_NOT_FOUND: '脚本已不可用。', CONVERSATION_NOT_FOUND: '该会话已不可用。',
     VERSION_CONFLICT: '草稿已有新版本，已重新加载，请核对后再修改。',
-    SOURCE_CHANGED: '修改稿改变了来源引用，请重试。' }[code ?? '']) ?? '生成失败，请稍后重试。'
+    SOURCE_CHANGED: '修改稿改变了来源引用，请重试。',
+    REQUEST_ID_REUSED: '生成条件已变化，请重新发起。' }[code ?? '']) ?? '生成失败，请稍后重试。'
 }
 function nodeLabel(node: string | null | undefined): string {
   const slot = /^slot(\d)\/(.+)$/.exec(node ?? '')
@@ -171,17 +182,20 @@ async function generateWeek() {
   pending.value = true
   error.value = ''
   run.value = null
+  const payload = { accountId: accountId.value, mode: 'WEEK_PLAN', instruction: instruction.value.trim(), slots: [
+    { column: 'Java 面试', materialIds: [weekMaterials.value.java1], instruction: '第一条 Java 快问快答' },
+    { column: 'Java 面试', materialIds: [weekMaterials.value.java2], instruction: '第二条 Java 快问快答，避免重复第一条' },
+    { column: '英语跟读', materialIds: [weekMaterials.value.english], instruction: '一条英语跟读练习' },
+  ] }
+  const signature = JSON.stringify(payload)
+  if (weekRequest?.signature !== signature) weekRequest = { signature, id: crypto.randomUUID() }
   try {
-    const result = await postJsonWithCsrf('/api/generations', { accountId: accountId.value,
-      mode: 'WEEK_PLAN', instruction: instruction.value.trim(), slots: [
-        { column: 'Java 面试', materialIds: [weekMaterials.value.java1], instruction: '第一条 Java 快问快答' },
-        { column: 'Java 面试', materialIds: [weekMaterials.value.java2], instruction: '第二条 Java 快问快答，避免重复第一条' },
-        { column: '英语跟读', materialIds: [weekMaterials.value.english], instruction: '一条英语跟读练习' },
-      ] }, 180_000)
+    const result = await postJsonWithCsrf('/api/generations', { ...payload, requestId: weekRequest.id }, 180_000)
     if (!validRun(result)) throw new Error('Invalid week run')
     run.value = result
+    if (result.status !== 'RUNNING') weekRequest = null
     if (result.status === 'FAILED') error.value = failureMessage(result.errorCode)
-    else await Promise.all([loadWeeks(), loadTopics()])
+    else if (result.status === 'SUCCEEDED') await Promise.all([loadWeeks(), loadTopics()])
   } catch (cause) {
     error.value = cause instanceof HttpError ? failureMessage(cause.code ?? null) : '暂时无法生成整周草稿。'
   } finally { pending.value = false }
@@ -254,7 +268,7 @@ onMounted(load)
         <button type="button" :disabled="pending || !instruction.trim() || !weekMaterials.java1 || !weekMaterials.java2 || !weekMaterials.english || weekMaterials.java1 === weekMaterials.java2"
           @click="generateWeek">{{ pending ? '生成中…' : '生成整周草稿' }}</button>
       </fieldset>
-      <p v-if="run" role="status">{{ run.status === 'SUCCEEDED' ? '已保存草稿。' : `${nodeLabel(run.failedNode)}失败（运行 ID：${run.id}）` }}</p>
+      <p v-if="run" role="status">{{ run.status === 'SUCCEEDED' ? '已保存草稿。' : run.status === 'RUNNING' ? '生成仍在进行中，稍后可再次点击查看结果。' : `${nodeLabel(run.failedNode)}失败（运行 ID：${run.id}）` }}</p>
       <p v-if="error" role="alert" class="error">{{ error }}</p>
     </div>
     <div class="results">
@@ -285,15 +299,15 @@ onMounted(load)
         <button type="button" :disabled="pending || !instruction.trim() || !selectedTopic.topic.sourceIds.length" @click="generate('SCRIPT')">{{ pending ? '生成中…' : '按选题写脚本' }}</button>
       </article>
       <article v-for="item in scripts" :key="item.id" class="result script">
-        <small>脚本草稿 · 版本 {{ item.version }}</small>
+        <small>{{ item.status === 'CONFIRMED' ? '已确认脚本' : '脚本草稿' }} · 版本 {{ item.version }}</small>
         <small>口播稿 {{ item.script.spokenText.length }} 字符 · 请按实际语速核对时长</small>
         <p class="preserve">{{ item.script.spokenText }}</p>
         <p class="preserve"><strong>拍摄建议：</strong>{{ item.script.shootingNotes }}</p>
         <ul class="sources"><li v-for="id in item.script.sourceIds" :key="id">{{ source(id)?.title ?? id }}</li></ul>
         <label :for="`revision-${item.id}`">定向修改这条脚本</label>
         <textarea :id="`revision-${item.id}`" v-model="revisions[item.id]" rows="2" maxlength="500"
-          :disabled="pending" placeholder="例如：改成 45 秒口播，语气自然，保留事实和来源" />
-        <button type="button" :disabled="pending || !revisions[item.id]?.trim()" @click="revise(item)">保存新版本</button>
+          :disabled="pending || item.status === 'CONFIRMED'" placeholder="例如：改成 45 秒口播，语气自然，保留事实和来源" />
+        <button type="button" :disabled="pending || item.status === 'CONFIRMED' || !revisions[item.id]?.trim()" @click="revise(item)">保存新版本</button>
         <button type="button" class="history-button" :disabled="pending" @click="showHistory(item.id)">
           {{ histories[item.id] ? '收起历史版本' : '查看历史版本' }}
         </button>

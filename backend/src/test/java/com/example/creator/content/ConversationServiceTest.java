@@ -35,6 +35,19 @@ class ConversationServiceTest {
             new Topic("Java 面试", "并发", "程序员", "可见性", "问题", "简答", List.of("m-1"), "资料"));
 
     @Test
+    void confirmedScriptCannotSpendAnotherModelCallBeforeReopening() {
+        var confirmed = new SavedScript("script-1", "topic-1", original.script(), "CONFIRMED", 2);
+        when(content.findScript(7, "script-1")).thenReturn(Optional.of(confirmed));
+        var service = new ConversationService(content, materials, model,
+                new ContentValidator(new ObjectMapper()));
+
+        assertThatThrownBy(() -> service.revise(7, "script-1",
+                new ConversationService.Revision(null, 2, "改口播")))
+                .isInstanceOf(ContentValidator.ContentInvalid.class).hasMessage("SCRIPT_CONFIRMED");
+        verify(model, never()).replyJson(any());
+    }
+
+    @Test
     void revisesOnlyOwnedScriptAndPreservesTheSameSource() {
         when(content.findScript(7, "script-1")).thenReturn(Optional.of(original));
         when(content.findTopic(7, "topic-1")).thenReturn(Optional.of(topic));
