@@ -42,6 +42,9 @@ creator:
     model-input-cny-per-million: ${MODEL_INPUT_CNY_PER_MILLION:}
     model-output-cny-per-million: ${MODEL_OUTPUT_CNY_PER_MILLION:}
     search-cny-per-call: ${MCP_SEARCH_CNY_PER_CALL:}
+    budget-enabled: ${USAGE_BUDGET_ENABLED:false}
+    monthly-user-call-limit: ${USER_MONTHLY_CALL_LIMIT:100}
+    monthly-system-budget-cny: ${SYSTEM_MONTHLY_BUDGET_CNY:100}
   jobs:
     scheduler-enabled: ${GENERATION_JOBS_SCHEDULER_ENABLED:false}
   model:

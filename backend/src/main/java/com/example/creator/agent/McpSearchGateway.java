@@ -91,8 +91,13 @@ public class McpSearchGateway {
     }
 
     public SearchResponse search(Long ownerId, String taskId, String query) {
-        String usageId = usage == null || ownerId == null ? null
-                : usage.start(ownerId, taskId, "MCP_SEARCH", "tavily", SEARCH_TOOL);
+        String usageId;
+        try {
+            usageId = usage == null || ownerId == null ? null
+                    : usage.start(ownerId, taskId, "MCP_SEARCH", "tavily", SEARCH_TOOL);
+        } catch (UsageLedger.BudgetPaused paused) {
+            throw new McpFailure(paused.getMessage());
+        }
         if (endpoint.isEmpty() || !allowedTools.contains(SEARCH_TOOL)) {
             if (usageId != null) usage.failed(usageId, "MCP_NOT_CONFIGURED");
             throw new McpFailure("MCP_NOT_CONFIGURED");

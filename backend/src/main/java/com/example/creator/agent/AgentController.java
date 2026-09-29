@@ -90,6 +90,8 @@ public class AgentController {
     private static HttpStatus statusFor(String code) {
         return switch (code) {
             case "MODEL_NOT_CONFIGURED", "MODEL_UPSTREAM_FAILED" -> HttpStatus.SERVICE_UNAVAILABLE;
+            case "USER_CALL_LIMIT_REACHED", "BUDGET_LIMIT_REACHED" -> HttpStatus.TOO_MANY_REQUESTS;
+            case "BUDGET_PRICE_UNCONFIGURED", "BUDGET_RECONCILIATION_REQUIRED" -> HttpStatus.SERVICE_UNAVAILABLE;
             case "MODEL_TIMEOUT" -> HttpStatus.GATEWAY_TIMEOUT;
             case "MODEL_INVALID_OUTPUT" -> HttpStatus.BAD_GATEWAY;
             case "ACCOUNT_NOT_FOUND" -> HttpStatus.NOT_FOUND;

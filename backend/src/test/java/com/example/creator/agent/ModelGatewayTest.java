@@ -14,6 +14,8 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -106,7 +108,8 @@ class ModelGatewayTest {
     @Test
     void recordsSuccessfulAndFailedProviderCallsAgainstTheOwnerAndTask() {
         var ledger = mock(UsageLedger.class);
-        when(ledger.start(7L, "task-1", "MODEL", "test-model", "reply"))
+        when(ledger.start(eq(7L), eq("task-1"), eq("MODEL"), eq("test-model"),
+                eq("reply"), anyInt()))
                 .thenReturn("call-1", "call-2");
         var gateway = new ModelGateway(ModelConfig.createModel(provider.baseUrl(), "test-only-key",
                 "test-model", Duration.ofSeconds(2)), json, ledger, "test-model");

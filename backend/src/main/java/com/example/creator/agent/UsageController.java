@@ -25,4 +25,15 @@ public class UsageController {
     public java.util.List<UsageLedger.Call> calls() {
         return ledger.recent(currentUser.id());
     }
+
+    @GetMapping("/budget")
+    public BudgetView budget() {
+        var status = ledger.budgetStatus(currentUser.id());
+        return new BudgetView(status.enabled(), status.utcMonth(), status.userCalls(),
+                status.userCallLimit(), status.systemLimitCny(), status.pauseCode());
+    }
+
+    public record BudgetView(boolean enabled, String utcMonth, long userCalls,
+                             int userCallLimit, java.math.BigDecimal systemLimitCny,
+                             String pauseCode) { }
 }

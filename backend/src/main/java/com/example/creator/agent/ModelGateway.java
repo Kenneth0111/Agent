@@ -140,17 +140,18 @@ public class ModelGateway {
     }
 
     private ChatResponse send(String operation, ChatRequest request, Long ownerId, String taskId) {
-        if (model == null) {
-            if (usage != null && ownerId != null)
-                usage.failed(usage.start(ownerId, taskId, "MODEL", provider, operation),
-                        "MODEL_NOT_CONFIGURED");
-            throw new ModelFailure("MODEL_NOT_CONFIGURED");
-        }
+        if (model == null) throw new ModelFailure("MODEL_NOT_CONFIGURED");
         long started = System.nanoTime();
         ChatResponse response;
         for (int attempt = 0; ; attempt++) {
-            String usageId = usage == null || ownerId == null ? null
-                    : usage.start(ownerId, taskId, "MODEL", provider, operation);
+            String usageId;
+            try {
+                usageId = usage == null || ownerId == null ? null
+                        : usage.start(ownerId, taskId, "MODEL", provider, operation,
+                                Math.min(Integer.MAX_VALUE - 256, request.toString().length()) + 256);
+            } catch (UsageLedger.BudgetPaused paused) {
+                throw new ModelFailure(paused.getMessage());
+            }
             try {
                 response = model.chat(request);
             } catch (RuntimeException failure) {
