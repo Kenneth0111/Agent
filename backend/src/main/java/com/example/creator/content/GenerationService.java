@@ -1,8 +1,11 @@
 package com.example.creator.content;
 
 import com.example.creator.content.ContentService.GenerationRun;
+import com.example.creator.content.ContentService.WeekStage;
 import com.example.creator.content.ContentValidator.ContentInvalid;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import org.springframework.stereotype.Service;
 
 /** Starts a durable run and delegates each content stage to the graph. */
@@ -39,6 +42,37 @@ public class GenerationService {
     }
 
     private GenerationRun generateWeek(long ownerId, Request request) {
+        validateWeek(request);
+        var reservation = content.reserveWeekRun(ownerId, request);
+        if (!reservation.created()) return reservation.run();
+        return continueWeek(ownerId, request, reservation.run(), List.of());
+    }
+
+    /** Only completed checkpoints are replayable; a started stage may contain an unknown paid call. */
+    Optional<GenerationRun> resumeWeek(long ownerId, String runId, Request request) {
+        validateWeek(request);
+        var run = content.findRun(ownerId, runId).orElse(null);
+        if (run == null || !"RUNNING".equals(run.status()) || !"WEEK_PLAN".equals(run.mode())
+                || !request.accountId().equals(run.accountId())) return Optional.empty();
+        var stages = content.weekStages(ownerId, runId);
+        if (!safeToResume(stages)) return Optional.empty();
+        return Optional.of(continueWeek(ownerId, request, run, stages));
+    }
+
+    private boolean safeToResume(List<WeekStage> stages) {
+        if (stages.isEmpty() || stages.size() > 7) return false;
+        for (int index = 0; index < stages.size(); index++) {
+            var stage = stages.get(index);
+            var name = index == 6 ? "saveWeekPlan" : "slot" + (index / 2 + 1) + "/"
+                    + (index % 2 == 0 ? "TOPICS" : "SCRIPT");
+            if (stage.index() != index || !name.equals(stage.name())
+                    || !"COMPLETED".equals(stage.status()) || stage.outputId() == null
+                    || stage.outputId().isBlank()) return false;
+        }
+        return true;
+    }
+
+    private void validateWeek(Request request) {
         var slots = request.slots();
         if (slots == null || slots.size() != 3
                 || slots.stream().anyMatch(slot -> slot == null || slot.materialIds() == null
@@ -47,21 +81,27 @@ public class GenerationService {
                 || !"Java 面试".equals(slots.get(0).column())
                 || !"Java 面试".equals(slots.get(1).column()) || !"英语跟读".equals(slots.get(2).column()))
             throw new ContentInvalid("INVALID_WEEK_PLAN");
-        var reservation = content.reserveWeekRun(ownerId, request);
-        if (!reservation.created()) return reservation.run();
-        var run = reservation.run();
-        var items = new java.util.ArrayList<ContentService.WeekItem>();
-        int attempts = 0;
+    }
+
+    private GenerationRun continueWeek(long ownerId, Request request, GenerationRun run,
+                                       List<WeekStage> completed) {
+        var slots = request.slots();
+        var items = new ArrayList<ContentService.WeekItem>();
+        int attempts = completed.stream().mapToInt(WeekStage::attempts).sum();
         for (int index = 0; index < slots.size(); index++) {
             var slot = slots.get(index);
             var instruction = request.instruction().strip() + "；第 " + (index + 1) + " 条："
                     + (slot.instruction() == null ? "" : slot.instruction().strip());
             try {
-                var topic = graph.run(ownerId, new Request(request.accountId(), "TOPICS", slot.column(),
-                        instruction, slot.materialIds(), null));
+                var topicRequest = new Request(request.accountId(), "TOPICS", slot.column(),
+                        instruction, slot.materialIds(), null);
+                var topic = stage(ownerId, run.id(), index * 2, "slot" + (index + 1) + "/TOPICS",
+                        topicRequest, completed);
                 attempts += topic.attempts();
-                var script = graph.run(ownerId, new Request(request.accountId(), "SCRIPT", null,
-                        instruction, null, topic.resultId()));
+                var scriptRequest = new Request(request.accountId(), "SCRIPT", null,
+                        instruction, null, topic.resultId());
+                var script = stage(ownerId, run.id(), index * 2 + 1, "slot" + (index + 1) + "/SCRIPT",
+                        scriptRequest, completed);
                 attempts += script.attempts();
                 items.add(new ContentService.WeekItem(slot.column(), topic.resultId(), script.resultId()));
             } catch (GenerationGraph.StageFailure failure) {
@@ -70,11 +110,26 @@ public class GenerationService {
             }
         }
         try {
-            var id = content.saveWeekPlan(ownerId, request.accountId(), items);
+            String id;
+            if (completed.size() == 7) id = completed.get(6).outputId();
+            else {
+                content.startWeekStage(ownerId, run.id(), 6, "saveWeekPlan", items);
+                id = content.saveWeekPlan(ownerId, request.accountId(), items);
+                content.completeWeekStage(ownerId, run.id(), 6, id, 0);
+            }
             return content.finishRun(ownerId, run.id(), id, attempts);
         } catch (ContentInvalid failure) {
             return content.failRun(ownerId, run.id(), failure.getMessage(), "saveWeekPlan", attempts);
         }
+    }
+
+    private GenerationGraph.Result stage(long ownerId, String runId, int index, String name, Request input,
+                                         List<WeekStage> completed) {
+        if (index < completed.size()) return new GenerationGraph.Result(completed.get(index).outputId(), 0);
+        content.startWeekStage(ownerId, runId, index, name, input);
+        var result = graph.run(ownerId, input);
+        content.completeWeekStage(ownerId, runId, index, result.resultId(), result.attempts());
+        return result;
     }
 
     public record Request(String accountId, String mode, String column, String instruction,
