@@ -2,6 +2,8 @@
 
 一个逐步开发中的 Java 内容创作与运营 Agent。目标是支持资料检索、选题、脚本、周排期及基于真实数据的复盘。
 
+📊 [查看开发进度看板](docs/PROGRESS.md)
+
 当前已支持邀请注册、登录、按用户隔离的内容账号与资料、个人资料优先检索、Java 面试及英语跟读选题/脚本生成、整周草稿、定向修改和周计划排期。开发环境已用 DeepSeek 完成真实内容联调。抖音指标接入及自动运行仍在后续计划中。
 
 ## 本地环境
@@ -137,6 +139,7 @@ V4/V4.1/V4.2/V4.3 迁移保存选题、脚本、生成运行、失败节点、�
 
 ## 进度与提交
 
+- [开发进度看板](docs/PROGRESS.md)：固定入口，按周查看完成、部分完成和待开始任务。每次更新任务清单后运行 `node scripts/update-progress.mjs` 并随代码提交；CI 会检查看板是否同步。本机未提交/未推送改动运行 `node scripts/update-progress.mjs --status` 查看。
 - [每日开发记录](docs/development-log.md)：实际完成、测试证据、问题及下一步。
 - [需求与实施计划](docs/项目需求与实施计划.md)：已确认范围。
 - [8 周每日清单](docs/superpowers/plans/2026-09-24-agent-daily-development-plan.md)：每日目标及验收标准。
