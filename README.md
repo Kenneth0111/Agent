@@ -137,6 +137,8 @@ V4/V4.1/V4.2/V4.3 迁移保存选题、脚本、生成运行、失败节点、�
 
 额度控制通过 `.env` 的 `USAGE_BUDGET_ENABLED=true` 显式启用；启用前须核实并填写上面的模型与 MCP 搜索单价。默认每用户每个 UTC 月最多 100 次外部调用，全系统同月预算上限为 100 元，可用 `USER_MONTHLY_CALL_LIMIT` 和 `SYSTEM_MONTHLY_BUDGET_CNY` 调整。模型调用按请求文本长度的保守 token 估计及最大 2048 个输出 token 预留，搜索按次预留；数据库串行核验预留，避免并发请求重复花掉剩余额度。成功且有用量时用估算费用核销；失败或缺少用量时保留预留，待供应商账单人工核对。历史未知费用且没有预留的调用会暂停新付费调用；预算满额、用户次数耗尽或单价缺失也会在调用前暂停。`GET /api/usage/budget` 返回当前用户次数、额度及暂停代码，不公开其他用户的明细或系统总支出。预算基于配置单价的估算，不等同供应商账单；若实际花费超过预留，后续调用会被阻断。
 
+登录后的“运行与用量”区域可按账号查看和保存周生成任务、启停任务、查看最近触发状态与失败代码，并查看当前用户的预算状态和最近 100 条模型/MCP 调用。手动运行会调用付费模型；页面在预算暂停或有未保存配置时禁用该入口。账号任务的“已启用”仅表示配置允许调度，后台自动扫描仍需服务器设置 `GENERATION_JOBS_SCHEDULER_ENABLED=true`。
+
 [W3 内容联调记录](docs/qa/2026-09-25-w3-generation.md)包含 3 道 Java 题和 1 条英语跟读的核对结果。脚本时长目前只由提示词引导，正式发布前仍需人工检查。
 
 接入实现参考：[Spring Security 会话管理](https://docs.spring.io/spring-security/reference/6.5/servlet/authentication/session-management.html)、[CSRF](https://docs.spring.io/spring-security/reference/6.5/servlet/exploits/csrf.html)、[Redisson 配置](https://redisson.pro/docs/configuration/)、[Testcontainers MySQL](https://java.testcontainers.org/modules/databases/mysql/)、[LangChain4j MCP](https://docs.langchain4j.dev/tutorials/mcp/)。

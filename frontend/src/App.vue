@@ -7,6 +7,7 @@ import AccountsPage from './pages/AccountsPage.vue'
 import MaterialsPage from './pages/MaterialsPage.vue'
 import GenerationPage from './pages/GenerationPage.vue'
 import SchedulePage from './pages/SchedulePage.vue'
+import OperationsPage from './pages/OperationsPage.vue'
 
 const connection = ref<'checking' | 'connected' | 'unavailable'>('checking')
 const signedIn = ref(false)
@@ -63,6 +64,7 @@ onBeforeUnmount(() => controller?.abort())
       <ChatPage v-if="signedIn" :key="accountRevision" />
       <GenerationPage v-if="signedIn" :key="accountRevision" />
       <SchedulePage v-if="signedIn" :key="accountRevision" />
+      <OperationsPage v-if="signedIn" :key="accountRevision" />
 
       <section class="preparation" aria-labelledby="preparation-title">
         <div class="preparation-copy">
