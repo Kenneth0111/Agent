@@ -3,6 +3,7 @@ package com.example.creator.content;
 import com.example.creator.agent.AccountProfiles;
 import com.example.creator.notification.NotificationService;
 import com.example.creator.notification.EmailSender;
+import com.example.creator.notification.FeishuSender;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -33,10 +34,11 @@ public class GenerationJobsService {
     private final RedissonClient redisson;
     private final NotificationService notifications;
     private final EmailSender emails;
+    private final FeishuSender feishu;
 
     GenerationJobsService(JdbcTemplate jdbc, AccountProfiles accounts, GenerationService generation,
                           ObjectMapper json, RedissonClient redisson, NotificationService notifications,
-                          EmailSender emails) {
+                          EmailSender emails, FeishuSender feishu) {
         this.jdbc = jdbc;
         this.accounts = accounts;
         this.generation = generation;
@@ -44,6 +46,7 @@ public class GenerationJobsService {
         this.redisson = redisson;
         this.notifications = notifications;
         this.emails = emails;
+        this.feishu = feishu;
     }
 
     @Transactional
@@ -157,9 +160,20 @@ public class GenerationJobsService {
         if (trigger.isPresent() && "SUCCEEDED".equals(trigger.get().status())) {
             try {
                 notifications.enqueue(ownerId, id, trigger.get().generationRunId());
-                emails.deliverPending(ownerId, id);
             } catch (RuntimeException failure) {
                 log.warn("notification enqueue failed: triggerId={} type={}", id,
+                        failure.getClass().getSimpleName());
+            }
+            try {
+                emails.deliverPending(ownerId, id);
+            } catch (RuntimeException failure) {
+                log.warn("email delivery failed: triggerId={} type={}", id,
+                        failure.getClass().getSimpleName());
+            }
+            try {
+                feishu.deliverPending(ownerId, id);
+            } catch (RuntimeException failure) {
+                log.warn("Feishu delivery failed: triggerId={} type={}", id,
                         failure.getClass().getSimpleName());
             }
         }

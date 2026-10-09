@@ -1,5 +1,6 @@
 package com.example.creator.notification;
 
+import java.net.URI;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -34,7 +35,7 @@ public class NotificationService {
         var webhook = encryptedOrOld(input.feishuWebhook(), previous.feishuWebhookEnc());
         var secret = encryptedOrOld(input.feishuSecret(), previous.feishuSecretEnc());
         if (input.feishuWebhook() != null && !input.feishuWebhook().isBlank()
-                && !input.feishuWebhook().startsWith("https://open.feishu.cn/open-apis/bot/v2/hook/"))
+                && !validFeishuWebhook(input.feishuWebhook()))
             throw new NotificationInvalid();
         if (input.emailEnabled() && (!email(recipient) || !email(from) || host == null || host.isBlank()
                 || host.length() > 255 || port == null || port < 1 || port > 65535
@@ -78,6 +79,24 @@ public class NotificationService {
         jdbc.update("""
                 UPDATE notification_deliveries SET status = ?, error_code = ?
                 WHERE id = ? AND owner_id = ? AND channel = 'EMAIL' AND status = 'PENDING'
+                """, status, code, deliveryId, ownerId);
+    }
+
+    Optional<FeishuDelivery> pendingFeishu(long ownerId, String triggerId) {
+        var settings = stored(ownerId);
+        if (!settings.feishuEnabled()) return Optional.empty();
+        return jdbc.query("""
+                SELECT id, generation_run_id FROM notification_deliveries
+                WHERE owner_id = ? AND trigger_id = ? AND channel = 'FEISHU' AND status = 'PENDING'
+                """, (row, ignored) -> new FeishuDelivery(row.getString("id"),
+                row.getString("generation_run_id"), settings.feishuWebhookEnc(),
+                settings.feishuSecretEnc()), ownerId, triggerId).stream().findFirst();
+    }
+
+    void finishFeishu(long ownerId, String deliveryId, String status, String code) {
+        jdbc.update("""
+                UPDATE notification_deliveries SET status = ?, error_code = ?
+                WHERE id = ? AND owner_id = ? AND channel = 'FEISHU' AND status = 'PENDING'
                 """, status, code, deliveryId, ownerId);
     }
 
@@ -125,6 +144,18 @@ public class NotificationService {
                 && value.matches("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$");
     }
 
+    static boolean validFeishuWebhook(String value) {
+        try {
+            var uri = URI.create(value);
+            return "https".equals(uri.getScheme()) && "open.feishu.cn".equals(uri.getHost())
+                    && uri.getPort() == -1 && uri.getUserInfo() == null
+                    && uri.getQuery() == null && uri.getFragment() == null
+                    && uri.getPath().matches("/open-apis/bot/v2/hook/[A-Za-z0-9_-]+");
+        } catch (IllegalArgumentException invalid) {
+            return false;
+        }
+    }
+
     public record SettingsInput(String emailRecipient, String smtpFromEmail, boolean emailEnabled, String smtpHost,
                                 Integer smtpPort, String smtpUsername, String smtpPassword,
                                 boolean feishuEnabled, String feishuWebhook, String feishuSecret) { }
@@ -134,6 +165,7 @@ public class NotificationService {
                                boolean feishuWebhookConfigured, boolean feishuSecretConfigured) { }
     record EmailDelivery(String id, String runId, String recipient, String from,
                          String host, int port, String usernameEnc, String passwordEnc) { }
+    record FeishuDelivery(String id, String runId, String webhookEnc, String secretEnc) { }
     private record Stored(String emailRecipient, String smtpFromEmail, boolean emailEnabled, String smtpHost,
                           Integer smtpPort, String smtpUsernameEnc, String smtpPasswordEnc,
                           boolean feishuEnabled, String feishuWebhookEnc, String feishuSecretEnc) { }

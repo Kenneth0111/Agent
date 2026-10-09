@@ -27,6 +27,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
@@ -44,6 +46,7 @@ class NotificationSettingsTest extends IntegrationTestSupport {
     @Autowired private GenerationJobsService jobs;
     @MockitoBean private GenerationService generation;
     @MockitoBean private EmailSender emails;
+    @MockitoBean private FeishuSender feishu;
 
     @Test
     void settingsAreOwnerScopedAndResponsesNeverExposeCredentials() throws Exception {
@@ -74,6 +77,9 @@ class NotificationSettingsTest extends IntegrationTestSupport {
         assertThat(ciphertext).startsWith("v1:").doesNotContain("smtp-secret");
         assertThat(put(a, "{\"emailEnabled\":true,\"feishuEnabled\":true}").body())
                 .contains("smtpPasswordConfigured\":true", "feishuSecretConfigured\":true");
+        assertThat(put(a, "{\"emailEnabled\":false,\"feishuEnabled\":true,"
+                + "\"feishuWebhook\":\"https://open.feishu.cn.evil.test/open-apis/bot/v2/hook/x\"}")
+                .statusCode()).isEqualTo(400);
     }
 
     @Test
@@ -96,7 +102,10 @@ class NotificationSettingsTest extends IntegrationTestSupport {
         var completed = content.finishRun(owner, started.id(), "week-batch-1", 6);
         when(generation.generate(eq(owner), any())).thenReturn(completed)
                 .thenThrow(new IllegalStateException("test failure"));
+        doThrow(new IllegalStateException("email unavailable"))
+                .when(emails).deliverPending(eq(owner), any());
         var trigger = jobs.trigger(owner, job.id(), GenerationJobsService.TriggerSource.MANUAL);
+        verify(feishu).deliverPending(owner, trigger.id());
         assertThat(jdbc.queryForList("SELECT channel FROM notification_deliveries "
                 + "WHERE owner_id = ? AND trigger_id = ? ORDER BY channel", String.class, owner,
                 trigger.id())).containsExactly("EMAIL", "FEISHU");
