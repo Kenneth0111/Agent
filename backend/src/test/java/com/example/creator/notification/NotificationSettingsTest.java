@@ -43,6 +43,7 @@ class NotificationSettingsTest extends IntegrationTestSupport {
     @Autowired private ContentService content;
     @Autowired private GenerationJobsService jobs;
     @MockitoBean private GenerationService generation;
+    @MockitoBean private EmailSender emails;
 
     @Test
     void settingsAreOwnerScopedAndResponsesNeverExposeCredentials() throws Exception {
@@ -52,7 +53,7 @@ class NotificationSettingsTest extends IntegrationTestSupport {
         login(a, "creator-a@example.test");
         login(b, "creator-b@example.test");
         var payload = """
-                {"emailRecipient":"owner@example.test","emailEnabled":true,
+                {"emailRecipient":"owner@example.test","smtpFromEmail":"sender@example.test","emailEnabled":true,
                  "smtpHost":"smtp.example.test","smtpPort":587,
                  "smtpUsername":"smtp-user","smtpPassword":"smtp-secret",
                  "feishuEnabled":true,
@@ -81,7 +82,7 @@ class NotificationSettingsTest extends IntegrationTestSupport {
         jdbc.update("INSERT INTO users (email, password_hash, display_name) VALUES (?, ?, ?)",
                 email, "test-only", "通知验收");
         var owner = jdbc.queryForObject("SELECT id FROM users WHERE email = ?", Long.class, email);
-        notifications.save(owner, new NotificationService.SettingsInput("owner@example.test", true,
+        notifications.save(owner, new NotificationService.SettingsInput("owner@example.test", "sender@example.test", true,
                 "smtp.example.test", 587, "smtp-user", "smtp-secret", true,
                 "https://open.feishu.cn/open-apis/bot/v2/hook/test-token", "sign-secret"));
         var account = accounts.create(owner, new AccountService.AccountInput("通知测试", "程序员",

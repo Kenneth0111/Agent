@@ -49,6 +49,7 @@ creator:
     scheduler-enabled: ${GENERATION_JOBS_SCHEDULER_ENABLED:false}
   notification:
     encryption-key: ${NOTIFICATION_ENCRYPTION_KEY:}
+    public-url: ${CREATOR_PUBLIC_BASE_URL:http://127.0.0.1:5173/}
   model:
     base-url: ${DEEPSEEK_BASE_URL:https://api.deepseek.com}
     api-key: ${DEEPSEEK_API_KEY:}

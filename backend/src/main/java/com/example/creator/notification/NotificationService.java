@@ -1,6 +1,7 @@
 package com.example.creator.notification;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -25,6 +26,7 @@ public class NotificationService {
         if (input == null) throw new NotificationInvalid();
         var previous = stored(ownerId);
         var recipient = choose(input.emailRecipient(), previous.emailRecipient());
+        var from = choose(input.smtpFromEmail(), previous.smtpFromEmail());
         var host = choose(input.smtpHost(), previous.smtpHost());
         var port = input.smtpPort() == null ? previous.smtpPort() : input.smtpPort();
         var username = encryptedOrOld(input.smtpUsername(), previous.smtpUsernameEnc());
@@ -34,21 +36,21 @@ public class NotificationService {
         if (input.feishuWebhook() != null && !input.feishuWebhook().isBlank()
                 && !input.feishuWebhook().startsWith("https://open.feishu.cn/open-apis/bot/v2/hook/"))
             throw new NotificationInvalid();
-        if (input.emailEnabled() && (!email(recipient) || host == null || host.isBlank()
+        if (input.emailEnabled() && (!email(recipient) || !email(from) || host == null || host.isBlank()
                 || host.length() > 255 || port == null || port < 1 || port > 65535
                 || username == null || password == null)
                 || input.feishuEnabled() && (webhook == null || secret == null))
             throw new NotificationInvalid();
         jdbc.update("""
-                INSERT INTO notification_settings (owner_id, email_recipient, email_enabled,
+                INSERT INTO notification_settings (owner_id, email_recipient, smtp_from_email, email_enabled,
                     smtp_host, smtp_port, smtp_username_enc, smtp_password_enc,
                     feishu_enabled, feishu_webhook_enc, feishu_secret_enc)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON DUPLICATE KEY UPDATE email_recipient = ?, email_enabled = ?, smtp_host = ?,
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON DUPLICATE KEY UPDATE email_recipient = ?, smtp_from_email = ?, email_enabled = ?, smtp_host = ?,
                     smtp_port = ?, smtp_username_enc = ?, smtp_password_enc = ?,
                     feishu_enabled = ?, feishu_webhook_enc = ?, feishu_secret_enc = ?
-                """, ownerId, recipient, input.emailEnabled(), host, port, username, password,
-                input.feishuEnabled(), webhook, secret, recipient, input.emailEnabled(), host, port,
+                """, ownerId, recipient, from, input.emailEnabled(), host, port, username, password,
+                input.feishuEnabled(), webhook, secret, recipient, from, input.emailEnabled(), host, port,
                 username, password, input.feishuEnabled(), webhook, secret);
         return settings(ownerId);
     }
@@ -57,6 +59,26 @@ public class NotificationService {
         var settings = stored(ownerId);
         if (settings.emailEnabled()) insert(ownerId, triggerId, runId, "EMAIL");
         if (settings.feishuEnabled()) insert(ownerId, triggerId, runId, "FEISHU");
+    }
+
+    Optional<EmailDelivery> pendingEmail(long ownerId, String triggerId) {
+        var settings = stored(ownerId);
+        if (!settings.emailEnabled()) return Optional.empty();
+        return jdbc.query("""
+                SELECT id, generation_run_id FROM notification_deliveries
+                WHERE owner_id = ? AND trigger_id = ? AND channel = 'EMAIL' AND status = 'PENDING'
+                """, (row, ignored) -> new EmailDelivery(row.getString("id"),
+                row.getString("generation_run_id"), settings.emailRecipient(),
+                settings.smtpFromEmail(), settings.smtpHost(), settings.smtpPort(),
+                settings.smtpUsernameEnc(), settings.smtpPasswordEnc()), ownerId, triggerId)
+                .stream().findFirst();
+    }
+
+    void finishEmail(long ownerId, String deliveryId, String status, String code) {
+        jdbc.update("""
+                UPDATE notification_deliveries SET status = ?, error_code = ?
+                WHERE id = ? AND owner_id = ? AND channel = 'EMAIL' AND status = 'PENDING'
+                """, status, code, deliveryId, ownerId);
     }
 
     private void insert(long ownerId, String triggerId, String runId, String channel) {
@@ -70,21 +92,21 @@ public class NotificationService {
 
     private Stored stored(long ownerId) {
         List<Stored> rows = jdbc.query("""
-                SELECT email_recipient, email_enabled, smtp_host, smtp_port,
+                SELECT email_recipient, smtp_from_email, email_enabled, smtp_host, smtp_port,
                     smtp_username_enc, smtp_password_enc, feishu_enabled,
                     feishu_webhook_enc, feishu_secret_enc
                 FROM notification_settings WHERE owner_id = ?
                 """, (row, ignored) -> new Stored(row.getString("email_recipient"),
-                row.getBoolean("email_enabled"), row.getString("smtp_host"),
+                row.getString("smtp_from_email"), row.getBoolean("email_enabled"), row.getString("smtp_host"),
                 (Integer) row.getObject("smtp_port"), row.getString("smtp_username_enc"),
                 row.getString("smtp_password_enc"), row.getBoolean("feishu_enabled"),
                 row.getString("feishu_webhook_enc"), row.getString("feishu_secret_enc")), ownerId);
-        return rows.isEmpty() ? new Stored(null, false, null, null, null, null,
+        return rows.isEmpty() ? new Stored(null, null, false, null, null, null, null,
                 false, null, null) : rows.getFirst();
     }
 
     private static SettingsView view(Stored stored) {
-        return new SettingsView(stored.emailRecipient(), stored.emailEnabled(), stored.smtpHost(),
+        return new SettingsView(stored.emailRecipient(), stored.smtpFromEmail(), stored.emailEnabled(), stored.smtpHost(),
                 stored.smtpPort(), stored.smtpUsernameEnc() != null, stored.smtpPasswordEnc() != null,
                 stored.feishuEnabled(), stored.feishuWebhookEnc() != null,
                 stored.feishuSecretEnc() != null);
@@ -103,14 +125,16 @@ public class NotificationService {
                 && value.matches("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$");
     }
 
-    public record SettingsInput(String emailRecipient, boolean emailEnabled, String smtpHost,
+    public record SettingsInput(String emailRecipient, String smtpFromEmail, boolean emailEnabled, String smtpHost,
                                 Integer smtpPort, String smtpUsername, String smtpPassword,
                                 boolean feishuEnabled, String feishuWebhook, String feishuSecret) { }
-    public record SettingsView(String emailRecipient, boolean emailEnabled, String smtpHost,
+    public record SettingsView(String emailRecipient, String smtpFromEmail, boolean emailEnabled, String smtpHost,
                                Integer smtpPort, boolean smtpUsernameConfigured,
                                boolean smtpPasswordConfigured, boolean feishuEnabled,
                                boolean feishuWebhookConfigured, boolean feishuSecretConfigured) { }
-    private record Stored(String emailRecipient, boolean emailEnabled, String smtpHost,
+    record EmailDelivery(String id, String runId, String recipient, String from,
+                         String host, int port, String usernameEnc, String passwordEnc) { }
+    private record Stored(String emailRecipient, String smtpFromEmail, boolean emailEnabled, String smtpHost,
                           Integer smtpPort, String smtpUsernameEnc, String smtpPasswordEnc,
                           boolean feishuEnabled, String feishuWebhookEnc, String feishuSecretEnc) { }
     static final class NotificationInvalid extends RuntimeException {
