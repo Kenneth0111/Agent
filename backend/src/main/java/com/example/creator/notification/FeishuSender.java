@@ -47,7 +47,7 @@ public class FeishuSender {
     }
 
     public void deliverPending(long ownerId, String triggerId) {
-        var pending = notifications.pendingFeishu(ownerId, triggerId);
+        var pending = notifications.claimFeishu(ownerId, triggerId);
         if (pending.isEmpty()) return;
         var delivery = pending.get();
         try {
@@ -63,8 +63,9 @@ public class FeishuSender {
                     .header("Content-Type", "application/json; charset=UTF-8")
                     .POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8)).build();
             var response = client.send(request, HttpResponse.BodyHandlers.ofString());
-            if (response.statusCode() == 408 || response.statusCode() == 429
-                    || response.statusCode() >= 500) {
+            if (response.statusCode() == 429) {
+                finish(ownerId, delivery.id(), "RETRY", "FEISHU_RATE_LIMITED");
+            } else if (response.statusCode() == 408 || response.statusCode() >= 500) {
                 finish(ownerId, delivery.id(), "UNKNOWN", "FEISHU_SEND_UNKNOWN");
             } else if (response.statusCode() < 200 || response.statusCode() >= 300) {
                 finish(ownerId, delivery.id(), "FAILED", "FEISHU_REJECTED");

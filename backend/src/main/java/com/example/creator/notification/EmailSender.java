@@ -25,7 +25,7 @@ public class EmailSender {
     }
 
     public void deliverPending(long ownerId, String triggerId) {
-        var pending = notifications.pendingEmail(ownerId, triggerId);
+        var pending = notifications.claimEmail(ownerId, triggerId);
         if (pending.isEmpty()) return;
         var delivery = pending.get();
         try {

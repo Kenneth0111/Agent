@@ -32,7 +32,7 @@ class FeishuSenderTest {
         assertThat(payload.get("content").get("text").asText())
                 .contains("https://creator.example.test/?run=run-1")
                 .doesNotContain("example-secret", "test-token");
-        when(notifications.pendingFeishu(7, "trigger-1")).thenReturn(Optional.of(delivery()));
+        when(notifications.claimFeishu(7, "trigger-1")).thenReturn(Optional.of(delivery()));
         var response = response(200, "{\"code\":0}");
         when(client.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
                 .thenReturn(response);
@@ -42,7 +42,7 @@ class FeishuSenderTest {
 
     @Test
     void rejectsProviderSignatureErrorWithoutLeakingResponse() throws Exception {
-        when(notifications.pendingFeishu(7, "trigger-1")).thenReturn(Optional.of(delivery()));
+        when(notifications.claimFeishu(7, "trigger-1")).thenReturn(Optional.of(delivery()));
         var response = response(200, "{\"code\":19021,\"msg\":\"secret-details\"}");
         when(client.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
                 .thenReturn(response);
@@ -52,12 +52,22 @@ class FeishuSenderTest {
 
     @Test
     void recordsServerFailureAsUnknown() throws Exception {
-        when(notifications.pendingFeishu(7, "trigger-1")).thenReturn(Optional.of(delivery()));
+        when(notifications.claimFeishu(7, "trigger-1")).thenReturn(Optional.of(delivery()));
         var response = response(503, "unavailable");
         when(client.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
                 .thenReturn(response);
         feishu.deliverPending(7, "trigger-1");
         verify(notifications).finishFeishu(7, "delivery-1", "UNKNOWN", "FEISHU_SEND_UNKNOWN");
+    }
+
+    @Test
+    void schedulesRetryOnlyForExplicitRateLimit() throws Exception {
+        when(notifications.claimFeishu(7, "trigger-1")).thenReturn(Optional.of(delivery()));
+        var response = response(429, "rate limited");
+        when(client.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+                .thenReturn(response);
+        feishu.deliverPending(7, "trigger-1");
+        verify(notifications).finishFeishu(7, "delivery-1", "RETRY", "FEISHU_RATE_LIMITED");
     }
 
     @Test
@@ -70,7 +80,7 @@ class FeishuSenderTest {
                 "https://open.feishu.cn/open-apis/bot/v2/hook/test-token?redirect=1")).isFalse();
         assertThat(NotificationService.validFeishuWebhook(
                 "https://open.feishu.cn/open-apis/bot/v2/hook/")).isFalse();
-        when(notifications.pendingFeishu(7, "trigger-1")).thenReturn(Optional.of(
+        when(notifications.claimFeishu(7, "trigger-1")).thenReturn(Optional.of(
                 new NotificationService.FeishuDelivery("delivery-1", "run-1",
                         cipher.encrypt("https://example.test/hook"), cipher.encrypt("sign-secret"))));
         feishu.deliverPending(7, "trigger-1");

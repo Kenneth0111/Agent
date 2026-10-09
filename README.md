@@ -145,6 +145,8 @@ V4/V4.1/V4.2/V4.3 迁移保存选题、脚本、生成运行、失败节点、�
 
 成功的周任务会为已启用渠道创建待投递记录。邮件渠道使用 SMTP 认证和强制 STARTTLS，正文只有简短提示及 `CREATOR_PUBLIC_BASE_URL` 下的运行链接，成功记 `SENT`，明确认证/格式拒绝记 `FAILED`，无法确认送达的服务错误记 `UNKNOWN`。飞书渠道发送带时间戳和 HMAC-SHA256 签名的文本消息，目标仅接受飞书机器人 HTTPS Webhook；邮件与飞书分别发送、分别记录结果。两个渠道的模拟测试已通过；真实测试邮箱/飞书群送达和登录后定位对应草稿仍待验收。
 
+投递记录按任务触发与渠道唯一。发送前原子领取记录，避免重复消费再次发送；飞书明确返回 HTTP 429 时在 1 分钟、5 分钟后最多自动补发两次。传输结果不明与进程中断的投递标为 `UNKNOWN`，不自动重发，以免重复通知。
+
 [W3 内容联调记录](docs/qa/2026-09-25-w3-generation.md)包含 3 道 Java 题和 1 条英语跟读的核对结果。脚本时长目前只由提示词引导，正式发布前仍需人工检查。
 
 接入实现参考：[Spring Security 会话管理](https://docs.spring.io/spring-security/reference/6.5/servlet/authentication/session-management.html)、[CSRF](https://docs.spring.io/spring-security/reference/6.5/servlet/exploits/csrf.html)、[Redisson 配置](https://redisson.pro/docs/configuration/)、[Testcontainers MySQL](https://java.testcontainers.org/modules/databases/mysql/)、[LangChain4j MCP](https://docs.langchain4j.dev/tutorials/mcp/)。

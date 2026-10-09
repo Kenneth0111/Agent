@@ -23,7 +23,7 @@ class EmailSenderTest {
 
     @Test
     void sendsOnlySummaryAndResultLinkThenRecordsSuccess() {
-        when(notifications.pendingEmail(7, "trigger-1")).thenReturn(Optional.of(delivery()));
+        when(notifications.claimEmail(7, "trigger-1")).thenReturn(Optional.of(delivery()));
         try (var senders = Mockito.mockConstruction(JavaMailSenderImpl.class, (sender, context) ->
                 when(sender.getJavaMailProperties()).thenReturn(new Properties()))) {
             emails.deliverPending(7, "trigger-1");
@@ -40,7 +40,7 @@ class EmailSenderTest {
 
     @Test
     void authenticationRejectionRecordsFailureWithoutLeakingProviderDetails() {
-        when(notifications.pendingEmail(7, "trigger-1")).thenReturn(Optional.of(delivery()));
+        when(notifications.claimEmail(7, "trigger-1")).thenReturn(Optional.of(delivery()));
         try (var senders = Mockito.mockConstruction(JavaMailSenderImpl.class, (sender, context) -> {
             when(sender.getJavaMailProperties()).thenReturn(new Properties());
             doThrow(new MailAuthenticationException("provider-secret-text"))

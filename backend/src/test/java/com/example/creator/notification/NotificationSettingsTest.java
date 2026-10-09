@@ -115,6 +115,29 @@ class NotificationSettingsTest extends IntegrationTestSupport {
                 .isInstanceOf(IllegalStateException.class);
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM notification_deliveries WHERE owner_id = ?",
                 Integer.class, owner)).isEqualTo(2);
+        notifications.enqueue(owner, trigger.id(), trigger.generationRunId());
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM notification_deliveries WHERE owner_id = ?",
+                Integer.class, owner)).isEqualTo(2);
+        var first = notifications.claimFeishu(owner, trigger.id()).orElseThrow();
+        assertThat(notifications.claimFeishu(owner, trigger.id())).isEmpty();
+        for (int attempt = 2; attempt <= 3; attempt++) {
+            notifications.finishFeishu(owner, first.id(), "RETRY", "FEISHU_RATE_LIMITED");
+            assertThat(notifications.dueRetries()).noneMatch(due -> due.triggerId().equals(trigger.id()));
+            jdbc.update("UPDATE notification_deliveries SET next_attempt_at = DATE_SUB(CURRENT_TIMESTAMP(6),"
+                    + " INTERVAL 1 SECOND) WHERE id = ?", first.id());
+            assertThat(notifications.dueRetries()).anyMatch(due -> due.triggerId().equals(trigger.id()));
+            assertThat(notifications.claimFeishu(owner, trigger.id())).isPresent();
+        }
+        notifications.finishFeishu(owner, first.id(), "RETRY", "FEISHU_RATE_LIMITED");
+        assertThat(jdbc.queryForObject("SELECT status FROM notification_deliveries WHERE id = ?",
+                String.class, first.id())).isEqualTo("FAILED");
+        assertThat(notifications.claimFeishu(owner, trigger.id())).isEmpty();
+        var emailDelivery = notifications.claimEmail(owner, trigger.id()).orElseThrow();
+        jdbc.update("UPDATE notification_deliveries SET updated_at = DATE_SUB(CURRENT_TIMESTAMP(6),"
+                + " INTERVAL 3 MINUTE) WHERE id = ?", emailDelivery.id());
+        notifications.markAbandonedUnknown();
+        assertThat(jdbc.queryForObject("SELECT status FROM notification_deliveries WHERE id = ?",
+                String.class, emailDelivery.id())).isEqualTo("UNKNOWN");
     }
 
     private HttpClient client() {

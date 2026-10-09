@@ -62,42 +62,80 @@ public class NotificationService {
         if (settings.feishuEnabled()) insert(ownerId, triggerId, runId, "FEISHU");
     }
 
-    Optional<EmailDelivery> pendingEmail(long ownerId, String triggerId) {
+    Optional<EmailDelivery> claimEmail(long ownerId, String triggerId) {
         var settings = stored(ownerId);
         if (!settings.emailEnabled()) return Optional.empty();
-        return jdbc.query("""
+        var delivery = jdbc.query("""
                 SELECT id, generation_run_id FROM notification_deliveries
-                WHERE owner_id = ? AND trigger_id = ? AND channel = 'EMAIL' AND status = 'PENDING'
+                WHERE owner_id = ? AND trigger_id = ? AND channel = 'EMAIL'
+                    AND (status = 'PENDING' OR (status = 'RETRY' AND next_attempt_at <= CURRENT_TIMESTAMP(6)))
                 """, (row, ignored) -> new EmailDelivery(row.getString("id"),
                 row.getString("generation_run_id"), settings.emailRecipient(),
                 settings.smtpFromEmail(), settings.smtpHost(), settings.smtpPort(),
-                settings.smtpUsernameEnc(), settings.smtpPasswordEnc()), ownerId, triggerId)
-                .stream().findFirst();
+                settings.smtpUsernameEnc(), settings.smtpPasswordEnc()), ownerId, triggerId).stream().findFirst();
+        return delivery.filter(value -> claim(ownerId, value.id(), "EMAIL"));
     }
 
     void finishEmail(long ownerId, String deliveryId, String status, String code) {
         jdbc.update("""
                 UPDATE notification_deliveries SET status = ?, error_code = ?
-                WHERE id = ? AND owner_id = ? AND channel = 'EMAIL' AND status = 'PENDING'
+                WHERE id = ? AND owner_id = ? AND channel = 'EMAIL' AND status = 'SENDING'
                 """, status, code, deliveryId, ownerId);
     }
 
-    Optional<FeishuDelivery> pendingFeishu(long ownerId, String triggerId) {
+    Optional<FeishuDelivery> claimFeishu(long ownerId, String triggerId) {
         var settings = stored(ownerId);
         if (!settings.feishuEnabled()) return Optional.empty();
-        return jdbc.query("""
+        var delivery = jdbc.query("""
                 SELECT id, generation_run_id FROM notification_deliveries
-                WHERE owner_id = ? AND trigger_id = ? AND channel = 'FEISHU' AND status = 'PENDING'
+                WHERE owner_id = ? AND trigger_id = ? AND channel = 'FEISHU'
+                    AND (status = 'PENDING' OR (status = 'RETRY' AND next_attempt_at <= CURRENT_TIMESTAMP(6)))
                 """, (row, ignored) -> new FeishuDelivery(row.getString("id"),
                 row.getString("generation_run_id"), settings.feishuWebhookEnc(),
                 settings.feishuSecretEnc()), ownerId, triggerId).stream().findFirst();
+        return delivery.filter(value -> claim(ownerId, value.id(), "FEISHU"));
     }
 
     void finishFeishu(long ownerId, String deliveryId, String status, String code) {
+        if ("RETRY".equals(status)) {
+            jdbc.update("""
+                    UPDATE notification_deliveries
+                    SET status = IF(attempt_count < 3, 'RETRY', 'FAILED'), error_code = ?,
+                        next_attempt_at = IF(attempt_count < 3,
+                            DATE_ADD(CURRENT_TIMESTAMP(6), INTERVAL IF(attempt_count = 1, 1, 5) MINUTE), NULL)
+                    WHERE id = ? AND owner_id = ? AND channel = 'FEISHU' AND status = 'SENDING'
+                    """, code, deliveryId, ownerId);
+            return;
+        }
         jdbc.update("""
-                UPDATE notification_deliveries SET status = ?, error_code = ?
-                WHERE id = ? AND owner_id = ? AND channel = 'FEISHU' AND status = 'PENDING'
+                UPDATE notification_deliveries SET status = ?, error_code = ?, next_attempt_at = NULL
+                WHERE id = ? AND owner_id = ? AND channel = 'FEISHU' AND status = 'SENDING'
                 """, status, code, deliveryId, ownerId);
+    }
+
+    List<DueDelivery> dueRetries() {
+        return jdbc.query("""
+                SELECT owner_id, trigger_id, channel FROM notification_deliveries
+                WHERE status = 'RETRY' AND next_attempt_at <= CURRENT_TIMESTAMP(6)
+                ORDER BY next_attempt_at LIMIT 100
+                """, (row, ignored) -> new DueDelivery(row.getLong("owner_id"),
+                row.getString("trigger_id"), row.getString("channel")));
+    }
+
+    void markAbandonedUnknown() {
+        jdbc.update("""
+                UPDATE notification_deliveries SET status = 'UNKNOWN', error_code = 'DELIVERY_INTERRUPTED'
+                WHERE status = 'SENDING' AND updated_at < DATE_SUB(CURRENT_TIMESTAMP(6), INTERVAL 2 MINUTE)
+                """);
+    }
+
+    private boolean claim(long ownerId, String id, String channel) {
+        return jdbc.update("""
+                UPDATE notification_deliveries
+                SET status = 'SENDING', attempt_count = attempt_count + 1, next_attempt_at = NULL
+                WHERE id = ? AND owner_id = ? AND channel = ? AND attempt_count < 3
+                    AND (status = 'PENDING' OR (status = 'RETRY' AND next_attempt_at <= CURRENT_TIMESTAMP(6)))
+                """, id, ownerId, channel) == 1;
     }
 
     private void insert(long ownerId, String triggerId, String runId, String channel) {
@@ -166,6 +204,7 @@ public class NotificationService {
     record EmailDelivery(String id, String runId, String recipient, String from,
                          String host, int port, String usernameEnc, String passwordEnc) { }
     record FeishuDelivery(String id, String runId, String webhookEnc, String secretEnc) { }
+    record DueDelivery(long ownerId, String triggerId, String channel) { }
     private record Stored(String emailRecipient, String smtpFromEmail, boolean emailEnabled, String smtpHost,
                           Integer smtpPort, String smtpUsernameEnc, String smtpPasswordEnc,
                           boolean feishuEnabled, String feishuWebhookEnc, String feishuSecretEnc) { }
