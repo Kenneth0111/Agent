@@ -141,6 +141,8 @@ V4/V4.1/V4.2/V4.3 迁移保存选题、脚本、生成运行、失败节点、�
 
 默认模型现为 `deepseek-flash`，请求使用非思考模式以控制短视频文案生成的 token 用量。DeepSeek 价格按缓存命中情况和时段变化，账本仅使用运行时配置的单价估算，实际扣费请核对供应商账单。[第 5 周真实任务验收记录](docs/qa/2026-10-09-w5-acceptance.md)给出了单次整周任务的 token 与费用样本。
 
+通知配置接口 `GET/PUT /api/notification-settings` 只读改当前用户的设置。收件邮箱、SMTP 主机和端口可读；SMTP 用户名/密码及飞书 Webhook/签名密钥是只写字段，响应只返回“已配置”标志，PUT 省略这些字段则保留原密文。启用渠道时必须具备对应配置。新建开发环境时 `scripts/init-dev.ps1` 会生成本机加密密钥；现有环境需在忽略提交的 `.env` 设置随机 32 字节密钥的 Base64 值 `NOTIFICATION_ENCRYPTION_KEY`，部署时由服务器环境提供并妥善备份，丢失后旧凭据无法解密。成功的周任务只创建各已启用渠道的 `PENDING` 待投递记录；实际邮件和飞书发送仍在后续任务中。
+
 [W3 内容联调记录](docs/qa/2026-09-25-w3-generation.md)包含 3 道 Java 题和 1 条英语跟读的核对结果。脚本时长目前只由提示词引导，正式发布前仍需人工检查。
 
 接入实现参考：[Spring Security 会话管理](https://docs.spring.io/spring-security/reference/6.5/servlet/authentication/session-management.html)、[CSRF](https://docs.spring.io/spring-security/reference/6.5/servlet/exploits/csrf.html)、[Redisson 配置](https://redisson.pro/docs/configuration/)、[Testcontainers MySQL](https://java.testcontainers.org/modules/databases/mysql/)、[LangChain4j MCP](https://docs.langchain4j.dev/tutorials/mcp/)。

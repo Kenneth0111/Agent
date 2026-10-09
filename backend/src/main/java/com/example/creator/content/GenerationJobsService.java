@@ -1,6 +1,7 @@
 package com.example.creator.content;
 
 import com.example.creator.agent.AccountProfiles;
+import com.example.creator.notification.NotificationService;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -13,6 +14,8 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.redisson.api.RedissonClient;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -21,19 +24,22 @@ import org.springframework.transaction.annotation.Transactional;
 /** Persists weekly generation configuration and source-labelled trigger runs. */
 @Service
 public class GenerationJobsService {
+    private static final Logger log = LoggerFactory.getLogger(GenerationJobsService.class);
     private final JdbcTemplate jdbc;
     private final AccountProfiles accounts;
     private final GenerationService generation;
     private final ObjectMapper json;
     private final RedissonClient redisson;
+    private final NotificationService notifications;
 
     GenerationJobsService(JdbcTemplate jdbc, AccountProfiles accounts, GenerationService generation,
-                          ObjectMapper json, RedissonClient redisson) {
+                          ObjectMapper json, RedissonClient redisson, NotificationService notifications) {
         this.jdbc = jdbc;
         this.accounts = accounts;
         this.generation = generation;
         this.json = json;
         this.redisson = redisson;
+        this.notifications = notifications;
     }
 
     @Transactional
@@ -143,7 +149,16 @@ public class GenerationJobsService {
                     "TRIGGER_FAILED", id, ownerId);
             throw failed;
         }
-        return findTrigger(ownerId, id);
+        var trigger = findTrigger(ownerId, id);
+        if (trigger.isPresent() && "SUCCEEDED".equals(trigger.get().status())) {
+            try {
+                notifications.enqueue(ownerId, id, trigger.get().generationRunId());
+            } catch (RuntimeException failure) {
+                log.warn("notification enqueue failed: triggerId={} type={}", id,
+                        failure.getClass().getSimpleName());
+            }
+        }
+        return trigger;
     }
 
     private Optional<TriggerRun> findScheduledTrigger(long ownerId, String jobId, String runKey) {

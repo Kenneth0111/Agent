@@ -47,6 +47,8 @@ creator:
     monthly-system-budget-cny: ${SYSTEM_MONTHLY_BUDGET_CNY:100}
   jobs:
     scheduler-enabled: ${GENERATION_JOBS_SCHEDULER_ENABLED:false}
+  notification:
+    encryption-key: ${NOTIFICATION_ENCRYPTION_KEY:}
   model:
     base-url: ${DEEPSEEK_BASE_URL:https://api.deepseek.com}
     api-key: ${DEEPSEEK_API_KEY:}

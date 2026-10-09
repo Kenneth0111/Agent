@@ -10,6 +10,12 @@ function New-LocalSecret {
     try { $rng.GetBytes($bytes) } finally { $rng.Dispose() }
     return ([BitConverter]::ToString($bytes)).Replace('-', '').ToLowerInvariant()
 }
+function New-EncryptionKey {
+    $bytes = New-Object byte[] 32
+    $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+    try { $rng.GetBytes($bytes) } finally { $rng.Dispose() }
+    return [Convert]::ToBase64String($bytes)
+}
 $settings = @(
     'SERVER_ADDRESS=127.0.0.1'
     'SERVER_PORT=18080'
@@ -19,6 +25,7 @@ $settings = @(
     ('MYSQL_ROOT_PASSWORD=' + (New-LocalSecret))
     ('DB_PASSWORD=' + (New-LocalSecret))
     ('REDIS_PASSWORD=' + (New-LocalSecret))
+    ('NOTIFICATION_ENCRYPTION_KEY=' + (New-EncryptionKey))
 )
 [IO.File]::WriteAllLines($envPath, $settings, (New-Object System.Text.UTF8Encoding $false))
 Write-Output 'Created ignored .env with random local credentials. No secret values were printed.'

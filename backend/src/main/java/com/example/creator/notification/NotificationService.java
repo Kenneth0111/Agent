@@ -1,0 +1,119 @@
+package com.example.creator.notification;
+
+import java.util.List;
+import java.util.UUID;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+@Service
+public class NotificationService {
+    private final JdbcTemplate jdbc;
+    private final SecretCipher cipher;
+
+    NotificationService(JdbcTemplate jdbc, SecretCipher cipher) {
+        this.jdbc = jdbc;
+        this.cipher = cipher;
+    }
+
+    public SettingsView settings(long ownerId) {
+        return view(stored(ownerId));
+    }
+
+    @Transactional
+    public SettingsView save(long ownerId, SettingsInput input) {
+        if (input == null) throw new NotificationInvalid();
+        var previous = stored(ownerId);
+        var recipient = choose(input.emailRecipient(), previous.emailRecipient());
+        var host = choose(input.smtpHost(), previous.smtpHost());
+        var port = input.smtpPort() == null ? previous.smtpPort() : input.smtpPort();
+        var username = encryptedOrOld(input.smtpUsername(), previous.smtpUsernameEnc());
+        var password = encryptedOrOld(input.smtpPassword(), previous.smtpPasswordEnc());
+        var webhook = encryptedOrOld(input.feishuWebhook(), previous.feishuWebhookEnc());
+        var secret = encryptedOrOld(input.feishuSecret(), previous.feishuSecretEnc());
+        if (input.feishuWebhook() != null && !input.feishuWebhook().isBlank()
+                && !input.feishuWebhook().startsWith("https://open.feishu.cn/open-apis/bot/v2/hook/"))
+            throw new NotificationInvalid();
+        if (input.emailEnabled() && (!email(recipient) || host == null || host.isBlank()
+                || host.length() > 255 || port == null || port < 1 || port > 65535
+                || username == null || password == null)
+                || input.feishuEnabled() && (webhook == null || secret == null))
+            throw new NotificationInvalid();
+        jdbc.update("""
+                INSERT INTO notification_settings (owner_id, email_recipient, email_enabled,
+                    smtp_host, smtp_port, smtp_username_enc, smtp_password_enc,
+                    feishu_enabled, feishu_webhook_enc, feishu_secret_enc)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON DUPLICATE KEY UPDATE email_recipient = ?, email_enabled = ?, smtp_host = ?,
+                    smtp_port = ?, smtp_username_enc = ?, smtp_password_enc = ?,
+                    feishu_enabled = ?, feishu_webhook_enc = ?, feishu_secret_enc = ?
+                """, ownerId, recipient, input.emailEnabled(), host, port, username, password,
+                input.feishuEnabled(), webhook, secret, recipient, input.emailEnabled(), host, port,
+                username, password, input.feishuEnabled(), webhook, secret);
+        return settings(ownerId);
+    }
+
+    public void enqueue(long ownerId, String triggerId, String runId) {
+        var settings = stored(ownerId);
+        if (settings.emailEnabled()) insert(ownerId, triggerId, runId, "EMAIL");
+        if (settings.feishuEnabled()) insert(ownerId, triggerId, runId, "FEISHU");
+    }
+
+    private void insert(long ownerId, String triggerId, String runId, String channel) {
+        jdbc.update("""
+                INSERT INTO notification_deliveries (id, owner_id, trigger_id, generation_run_id,
+                    channel, status)
+                VALUES (?, ?, ?, ?, ?, 'PENDING')
+                ON DUPLICATE KEY UPDATE id = id
+                """, UUID.randomUUID().toString(), ownerId, triggerId, runId, channel);
+    }
+
+    private Stored stored(long ownerId) {
+        List<Stored> rows = jdbc.query("""
+                SELECT email_recipient, email_enabled, smtp_host, smtp_port,
+                    smtp_username_enc, smtp_password_enc, feishu_enabled,
+                    feishu_webhook_enc, feishu_secret_enc
+                FROM notification_settings WHERE owner_id = ?
+                """, (row, ignored) -> new Stored(row.getString("email_recipient"),
+                row.getBoolean("email_enabled"), row.getString("smtp_host"),
+                (Integer) row.getObject("smtp_port"), row.getString("smtp_username_enc"),
+                row.getString("smtp_password_enc"), row.getBoolean("feishu_enabled"),
+                row.getString("feishu_webhook_enc"), row.getString("feishu_secret_enc")), ownerId);
+        return rows.isEmpty() ? new Stored(null, false, null, null, null, null,
+                false, null, null) : rows.getFirst();
+    }
+
+    private static SettingsView view(Stored stored) {
+        return new SettingsView(stored.emailRecipient(), stored.emailEnabled(), stored.smtpHost(),
+                stored.smtpPort(), stored.smtpUsernameEnc() != null, stored.smtpPasswordEnc() != null,
+                stored.feishuEnabled(), stored.feishuWebhookEnc() != null,
+                stored.feishuSecretEnc() != null);
+    }
+
+    private String encryptedOrOld(String incoming, String previous) {
+        return incoming == null || incoming.isBlank() ? previous : cipher.encrypt(incoming);
+    }
+
+    private static String choose(String incoming, String previous) {
+        return incoming == null ? previous : incoming.isBlank() ? null : incoming.strip();
+    }
+
+    private static boolean email(String value) {
+        return value != null && value.length() <= 254
+                && value.matches("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$");
+    }
+
+    public record SettingsInput(String emailRecipient, boolean emailEnabled, String smtpHost,
+                                Integer smtpPort, String smtpUsername, String smtpPassword,
+                                boolean feishuEnabled, String feishuWebhook, String feishuSecret) { }
+    public record SettingsView(String emailRecipient, boolean emailEnabled, String smtpHost,
+                               Integer smtpPort, boolean smtpUsernameConfigured,
+                               boolean smtpPasswordConfigured, boolean feishuEnabled,
+                               boolean feishuWebhookConfigured, boolean feishuSecretConfigured) { }
+    private record Stored(String emailRecipient, boolean emailEnabled, String smtpHost,
+                          Integer smtpPort, String smtpUsernameEnc, String smtpPasswordEnc,
+                          boolean feishuEnabled, String feishuWebhookEnc, String feishuSecretEnc) { }
+    static final class NotificationInvalid extends RuntimeException {
+        NotificationInvalid() { super("INVALID_NOTIFICATION_SETTINGS", null, false, false); }
+    }
+}
