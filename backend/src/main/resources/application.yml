@@ -50,7 +50,7 @@ creator:
   model:
     base-url: ${DEEPSEEK_BASE_URL:https://api.deepseek.com}
     api-key: ${DEEPSEEK_API_KEY:}
-    name: ${DEEPSEEK_MODEL:deepseek-chat}
+    name: ${DEEPSEEK_MODEL:deepseek-flash}
     timeout: ${DEEPSEEK_TIMEOUT:30s}
   mcp:
     search:

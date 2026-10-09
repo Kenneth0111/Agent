@@ -139,6 +139,8 @@ V4/V4.1/V4.2/V4.3 迁移保存选题、脚本、生成运行、失败节点、�
 
 登录后的“运行与用量”区域可按账号查看和保存周生成任务、启停任务、查看最近触发状态与失败代码，并查看当前用户的预算状态和最近 100 条模型/MCP 调用。手动运行会调用付费模型；页面在预算暂停或有未保存配置时禁用该入口。账号任务的“已启用”仅表示配置允许调度，后台自动扫描仍需服务器设置 `GENERATION_JOBS_SCHEDULER_ENABLED=true`。
 
+默认模型现为 `deepseek-flash`，请求使用非思考模式以控制短视频文案生成的 token 用量。DeepSeek 价格按缓存命中情况和时段变化，账本仅使用运行时配置的单价估算，实际扣费请核对供应商账单。[第 5 周真实任务验收记录](docs/qa/2026-10-09-w5-acceptance.md)给出了单次整周任务的 token 与费用样本。
+
 [W3 内容联调记录](docs/qa/2026-09-25-w3-generation.md)包含 3 道 Java 题和 1 条英语跟读的核对结果。脚本时长目前只由提示词引导，正式发布前仍需人工检查。
 
 接入实现参考：[Spring Security 会话管理](https://docs.spring.io/spring-security/reference/6.5/servlet/authentication/session-management.html)、[CSRF](https://docs.spring.io/spring-security/reference/6.5/servlet/exploits/csrf.html)、[Redisson 配置](https://redisson.pro/docs/configuration/)、[Testcontainers MySQL](https://java.testcontainers.org/modules/databases/mysql/)、[LangChain4j MCP](https://docs.langchain4j.dev/tutorials/mcp/)。

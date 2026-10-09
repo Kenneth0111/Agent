@@ -20,7 +20,7 @@ class DeepSeekLiveCallTest {
     private final ModelGateway gateway = new ModelGateway(ModelConfig.createModel(
             environment("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
             System.getenv("DEEPSEEK_API_KEY"),
-            environment("DEEPSEEK_MODEL", "deepseek-chat"),
+            environment("DEEPSEEK_MODEL", "deepseek-flash"),
             Duration.ofSeconds(30)), new ObjectMapper());
 
     private static String environment(String name, String fallback) {
