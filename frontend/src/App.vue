@@ -9,6 +9,7 @@ import GenerationPage from './pages/GenerationPage.vue'
 import SchedulePage from './pages/SchedulePage.vue'
 import OperationsPage from './pages/OperationsPage.vue'
 import NotificationPage from './pages/NotificationPage.vue'
+import AnalyticsPage from './pages/AnalyticsPage.vue'
 
 const connection = ref<'checking' | 'connected' | 'unavailable'>('checking')
 const signedIn = ref(false)
@@ -68,6 +69,7 @@ onBeforeUnmount(() => controller?.abort())
       <SchedulePage v-if="signedIn" :key="accountRevision" />
       <OperationsPage v-if="signedIn" :key="accountRevision" />
       <NotificationPage v-if="signedIn" />
+      <AnalyticsPage v-if="signedIn" :key="accountRevision" />
 
       <section class="preparation" aria-labelledby="preparation-title">
         <div class="preparation-copy">

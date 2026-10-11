@@ -56,6 +56,25 @@ class MetricsImportHttpTest extends IntegrationTestSupport {
         var conflict = upload(a, "confirm", csv.replace(",100,0,,", ",101,0,,"), true);
         assertThat(conflict.statusCode()).isEqualTo(422);
         assertThat(conflict.body()).contains("SNAPSHOT_CONFLICT");
+        var works = get(a, "/api/metrics/works?accountId=" + accountId);
+        assertThat(works.statusCode()).isEqualTo(200);
+        var workId = json.readTree(works.body()).get(0).get("id").asText();
+        var path = "/api/metrics/works/" + workId + "/trend?source=DEMO_MANUAL";
+        var trend = get(a, path);
+        assertThat(trend.statusCode()).isEqualTo(200);
+        var point = json.readTree(trend.body()).get("points").get(0);
+        assertThat(point.get("views").isTextual()).isTrue();
+        assertThat(point.get("views").asText()).isEqualTo("100");
+        assertThat(point.get("likes").asText()).isEqualTo("0");
+        assertThat(point.get("commentCount").isNull()).isTrue();
+        assertThat(point.get("viewsDelta").isNull()).isTrue();
+        assertThat(get(b, path).statusCode()).isEqualTo(404);
+        assertThat(get(b, "/api/metrics/works?accountId=" + accountId).statusCode()).isEqualTo(404);
+        assertThat(get(client(), path).statusCode()).isEqualTo(401);
+    }
+
+    private HttpResponse<String> get(HttpClient client, String path) throws Exception {
+        return client.send(HttpRequest.newBuilder(uri(path)).GET().build(), HttpResponse.BodyHandlers.ofString());
     }
 
     private HttpResponse<String> upload(HttpClient client, String action, String csv, boolean csrf) throws Exception {

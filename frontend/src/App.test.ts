@@ -16,7 +16,7 @@ describe('service connection', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{"status":"UP"}')))
     const wrapper = mount(App, { global: { stubs: {
       AccountsPage: true, MaterialsPage: true, ChatPage: true, SchedulePage: true,
-      OperationsPage: true, NotificationPage: true,
+      OperationsPage: true, NotificationPage: true, AnalyticsPage: true,
       GenerationPage: { props: ['linkedRunId'], template: '<div data-test="linked-run">{{ linkedRunId }}</div>' },
     } } })
     await flushPromises()

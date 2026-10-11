@@ -62,3 +62,19 @@ W7-D1/D2 数据约定，2026-10-11。数据库结构、模板及指标上传预�
 常见逐行错误：`CSV_COLUMNS_INVALID`、`ACCOUNT_ID_INVALID`、`ACCOUNT_NOT_FOUND`、`VIDEO_ID_INVALID`、`CAPTURED_AT_INVALID`、`VIEWS_INVALID`、`LIKES_INVALID`、`COMMENT_COUNT_INVALID`、`METRICS_MISSING`、`SOURCE_INVALID`、`SNAPSHOT_CONFLICT`。文件级错误包括 `CSV_EMPTY`、`CSV_NO_ROWS`、`CSV_HEADER_INVALID`、`CSV_UTF8_INVALID`、`CSV_INVALID`、`CSV_TOO_LARGE`、`CSV_TOO_MANY_ROWS`。空行也作为错误记录处理，不静默跳过。
 
 本接口目前只导入指标；评论模板与结构已准备，评论导入仍属于 W7-D4。上述自动测试使用演示数据，不表示已完成真实运营数据验收。
+
+## 作品与观测趋势读取
+
+登录后，`GET /api/metrics/works?accountId=内部账号UUID` 返回本人账号的作品 `id`、外部 `videoId` 和实际存在的 `sources`。`GET /api/metrics/works/{workId}/trend?source=来源` 返回该作品、该来源的观测序列。其他用户的账号或作品返回 404，匿名返回 401；不同来源（包括大小写不同的来源）分别计算。
+
+趋势包含 `workId`、`source`、`truncated`、`points`。最多取最近 1000 条快照，再按 UTC 观测时间从早到晚排列；超过窗口时 `truncated=true`，页面明确提示。每个点的字段如下：
+
+| 字段 | 含义 |
+| --- | --- |
+| capturedAt / previousCapturedAt | 当前、窗口内上一次观测时间；首条 previousCapturedAt 为 null |
+| views / likes / commentCount | 当前快照累计值，十进制字符串或 null；字符串避免 JavaScript 大整数精度损失 |
+| viewsDelta / likesDelta / commentCountDelta | 当前减去相邻上次值，十进制字符串或 null；任一端缺失不计算，也不跨过缺失点补算 |
+| likeViewPercent / commentViewPercent | 当前累计点赞/播放、评论/播放的百分数，字符串保留 6 位小数（HALF_UP）；缺少操作数或播放为 0 时 null |
+| correction | 任一可计算变化量为负时 true，提示核对来源和累计口径，不将下降解释为新增 |
+
+窗口首条仅显示累计值，变化量始终未知；最近快照缺失的累计指标不沿用更早数据。比值不限定为 0～100，也不宣称为平台互动率；观测间隔不同，变化量不能直接比较增长速度。前端显示本地时间，原始 UTC 时间保留在 time 标签的 datetime/title 中。

@@ -11,6 +11,7 @@ TavilyAPIkey.md
 .local/
 .superpowers/
 .worktrees/
+/output/playwright/
 node_modules/
 dist/
 target/
