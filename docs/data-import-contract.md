@@ -36,7 +36,7 @@ W7-D1/D2 数据约定，2026-10-11。数据库结构、模板及指标上传预�
 | publishedAt | 评论发布时间，可留空表示未知；填写时使用带时区 ISO 8601 |
 | capturedAt | 样本实际采集时间，必填，规则同指标 |
 
-评论唯一键为 `(accountId, videoId, commentId, source)`。相同键且文本/发布时间一致可跳过重复；内容冲突需显示行号。采集时间可用于溯源，不能冒充发布时间。导入前去除不必要的评论者身份和个人信息；模板及数据库不设置昵称、头像、手机号、评论者 ID 字段。仅导入实际可取得且允许使用的评论文本。
+评论唯一键为 `(accountId, videoId, commentId, source)`。相同键且脱敏后文本/发布时间一致跳过重复；内容冲突需显示记录编号。重导仅采集时间不同也视为重复，保留首次写入的采集时间，不覆盖为本次时间。采集时间可用于溯源，不能冒充发布时间。导入前去除不必要的评论者身份和个人信息；模板及数据库不设置昵称、头像、手机号、评论者 ID 字段。仅导入实际可取得且允许使用的评论文本。
 
 ## 数据模型与样例
 
@@ -61,7 +61,31 @@ W7-D1/D2 数据约定，2026-10-11。数据库结构、模板及指标上传预�
 
 常见逐行错误：`CSV_COLUMNS_INVALID`、`ACCOUNT_ID_INVALID`、`ACCOUNT_NOT_FOUND`、`VIDEO_ID_INVALID`、`CAPTURED_AT_INVALID`、`VIEWS_INVALID`、`LIKES_INVALID`、`COMMENT_COUNT_INVALID`、`METRICS_MISSING`、`SOURCE_INVALID`、`SNAPSHOT_CONFLICT`。文件级错误包括 `CSV_EMPTY`、`CSV_NO_ROWS`、`CSV_HEADER_INVALID`、`CSV_UTF8_INVALID`、`CSV_INVALID`、`CSV_TOO_LARGE`、`CSV_TOO_MANY_ROWS`。空行也作为错误记录处理，不静默跳过。
 
-本接口目前只导入指标；评论模板与结构已准备，评论导入仍属于 W7-D4。上述自动测试使用演示数据，不表示已完成真实运营数据验收。
+上述两个接口只导入指标；评论使用下述独立入口。自动测试使用演示数据，不表示已完成真实运营数据验收。
+
+## 评论上传接口
+
+`POST /api/metrics/import/comments/preview` 与 `/comments/confirm` 使用同一会话、CSRF、multipart `file`、1 MiB 和 1000 条记录限制。表头必须依次为 `accountId,videoId,commentId,text,publishedAt,capturedAt,source`；不接收额外作者字段。UTF-8/BOM、引号内换行与逗号均支持；未知发布时间留空，采集时间必填，时间转为 UTC，最多 6 位小数秒。
+
+评论原文去除两端空白后为 1～2000 个 Unicode 字符，拒绝 NUL。正文中的常见 ASCII 邮箱和连续数字的中国大陆手机号（含可选 86/+86 前缀）分别替换为 `[邮箱]`、`[手机号]`。预览、存储与检索只保留替换后的正文；逐行 `redacted=true` 表示本次有替换。此规则不识别人名、地址、微信号、其它地区号码或分隔写法，这些无关标识由导入者提前移除。外部作品/评论标识需使用稳定编号，不使用个人联系方式。
+
+响应同样包含 `canImport` 或 `imported/duplicates` 及 `rows`。评论 `data` 含规范化字段；错误行 `data=null`，不回显原始正文。正文或发布时间冲突代码为 `COMMENT_CONFLICT`，非法正文、评论标识、发布时间分别为 `COMMENT_TEXT_INVALID`、`COMMENT_ID_INVALID`、`PUBLISHED_AT_INVALID`；公共字段/文件错误沿用指标导入代码。预览不写入，确认重新检查归属与重复，任何错误整份返回 422、不部分写入。评论和指标确认共用账号锁，并发创建同一作品复用同一记录。
+
+[`video-comments-errors.csv`](samples/video-comments-errors.csv) 演示重复、冲突、缺失正文与坏时间；内部账号 UUID 需替换为本人的账号，不能作为真实运营证据。
+
+## 评论与参考资料的主题证据
+
+`GET /api/metrics/review-evidence?accountId=内部账号UUID&q=关键词` 返回本人账号的主题证据。查询为 1～100 字，按字面子串匹配，不把 `%`、`_` 等视作通配符；没有语义分类或情绪分析。无权账号返回 404、匿名返回 401、非法查询返回 400。
+
+| 字段 | 含义 |
+| --- | --- |
+| accountId / topic | 已验证的账号与去除两端空白后的查询 |
+| commentStatus | `MATCHED` 有匹配样本；`NO_COMMENT_SAMPLES` 尚无样本；`NO_TOPIC_MATCH` 有样本但未匹配，不能据此判断需求不存在 |
+| commentBasis | 确定性的证据说明，匹配时引用真实 `comment:内部UUID`，不宣称代表全部观众 |
+| comments / commentsTruncated | 按采集时间从新到旧的最多 20 条匹配样本；更多匹配时标记 true |
+| referenceMaterials | 复用现有资料检索的 status/results，保留资料 ID、原文片段、标题及 sourceUrl/fileName/kind |
+
+每条评论包含 `citationId`、`workId`、`videoId`、脱敏 `text`、可空 `publishedAt`、`capturedAt`、`source`；不返回作者信息或外部评论标识。参考资料只涵盖本人可见且适用于该账号的用户导入材料，可包含同行参考；其中数字是原材料的陈述，不是已核实的平台指标。缺失的同行指标不推测或补零，也不宣称取得完整同行监控。模型复盘在 W7-D5 接入上述证据，数据页在 W7-D6 集成。
 
 ## 作品与观测趋势读取
 

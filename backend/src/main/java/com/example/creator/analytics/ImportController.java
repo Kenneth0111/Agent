@@ -18,10 +18,12 @@ import org.springframework.web.multipart.MultipartFile;
 public class ImportController {
     private final CurrentUser currentUser;
     private final ImportService imports;
+    private final CommentImportService comments;
 
-    ImportController(CurrentUser currentUser, ImportService imports) {
+    ImportController(CurrentUser currentUser, ImportService imports, CommentImportService comments) {
         this.currentUser = currentUser;
         this.imports = imports;
+        this.comments = comments;
     }
 
     @PostMapping(value = "/preview", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
@@ -32,6 +34,31 @@ public class ImportController {
     @PostMapping(value = "/confirm", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<?> confirm(@RequestParam MultipartFile file) {
         return upload(file, true);
+    }
+
+    @PostMapping(value = "/comments/preview", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<?> previewComments(@RequestParam MultipartFile file) {
+        return uploadComments(file, false);
+    }
+
+    @PostMapping(value = "/comments/confirm", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<?> confirmComments(@RequestParam MultipartFile file) {
+        return uploadComments(file, true);
+    }
+
+    private ResponseEntity<?> uploadComments(MultipartFile file, boolean confirm) {
+        if (file.getSize() > ImportService.MAX_BYTES) return tooLarge();
+        try {
+            var ownerId = currentUser.id();
+            var bytes = file.getBytes();
+            return ResponseEntity.ok(confirm ? comments.confirm(ownerId, bytes) : comments.preview(ownerId, bytes));
+        } catch (CommentImportService.ImportRejected rejected) {
+            return ResponseEntity.unprocessableEntity().body(rejected.preview());
+        } catch (DataIntegrityViolationException changed) {
+            return ResponseEntity.status(409).body(new ErrorView("IMPORT_CONFLICT_RETRY_PREVIEW"));
+        } catch (IOException invalid) {
+            return ResponseEntity.badRequest().body(new ErrorView("CSV_READ_FAILED"));
+        }
     }
 
     private ResponseEntity<?> upload(MultipartFile file, boolean confirm) {

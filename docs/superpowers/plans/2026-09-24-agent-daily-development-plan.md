@@ -93,7 +93,7 @@
 | F24 | `backend/src/main/java/com/example/creator/notification/EmailSender.java` | 邮件适配 |
 | F25 | `backend/src/main/java/com/example/creator/notification/FeishuSender.java` | 飞书适配和签名 |
 | F26 | `frontend/src/pages/NotificationSettingsPage.vue` | 本人渠道配置及投递反馈 |
-| F27 | `backend/src/main/java/com/example/creator/analytics/ImportService.java`、`backend/src/main/java/com/example/creator/analytics/ImportController.java` | 指标及评论导入、预览、逐行错误和去重 |
+| F27 | `backend/src/main/java/com/example/creator/analytics/ImportService.java`、`backend/src/main/java/com/example/creator/analytics/CommentImportService.java`、`backend/src/main/java/com/example/creator/analytics/ImportController.java` | 指标及评论导入、预览、逐行错误和去重 |
 | F28 | `docs/templates/video-metrics.csv`、`docs/templates/video-comments.csv` | 指标和评论输入模板 |
 | F29 | `backend/src/main/java/com/example/creator/analytics/MetricsService.java` | 确定性趋势计算与数据口径 |
 | F30 | `backend/src/main/java/com/example/creator/analytics/ReviewService.java`、`backend/src/main/resources/prompts/operation-review.txt` | 复盘事实、解释和下一步建议 |
@@ -543,7 +543,7 @@ F03 中已执行的迁移为 `V1__users.sql`（W1-D2）、`V2__invitations.sql`�
 
   **完成标准：** 固定输入可手工算出相同结果；单个快照不伪装成增长趋势；缺失点不会自动变零。
 
-- [ ] **W7-D4｜周四｜1.5 小时｜评论需求与同行参考**
+- [x] **W7-D4｜周四｜1.5 小时｜评论需求与同行参考**
 
   **动作：** 支持导入自己作品的评论文本并去除不必要的个人标识；将评论和同行参考材料按主题检索；同行可用指标只显示有来源的字段。
 
