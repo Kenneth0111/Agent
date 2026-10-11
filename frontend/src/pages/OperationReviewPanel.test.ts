@@ -16,6 +16,8 @@ const report = { id: 'r1', accountId: 'a', status: 'INSUFFICIENT_DATA', attempts
       commentsTruncated: false, comments: [], referenceMaterials: { status: 'INSUFFICIENT_MATERIAL', results: [] } },
   }, advice: { hypotheses: [], experiments: [] },
 }
+const publication = { workId: 'w', planId: 'original-plan', itemId: 'published-item', topicId: 'original-topic', scriptId: 'original-script',
+  publicationUrl: null, publishedAt: '2026-10-10T09:00:00Z', scheduledDate: '2026-10-10' }
 function reply(input: unknown) {
   const request = input as ReviewRequest
   return { ...report, request, facts: { ...report.facts, from: request.from, to: request.to } }
@@ -44,6 +46,28 @@ it('opens a scheduled report by its owned id without generating a new report', a
   expect(request).toHaveBeenCalledWith('/api/metrics/reviews/r1')
   expect(wrapper.text()).toContain('样本不足，已跳过模型')
   expect(postJsonWithCsrf).not.toHaveBeenCalled()
+  wrapper.unmount()
+})
+
+it('accepts a generated report with an ID-only publication and clears its pending request', async () => {
+  const point = { capturedAt: '2026-10-10T10:00:00Z', previousCapturedAt: null, views: '150', likes: '10', commentCount: '3',
+    viewsDelta: null, likesDelta: null, commentCountDelta: null, likeViewPercent: '6.666667', commentViewPercent: '2.000000', correction: false }
+  vi.mocked(postJsonWithCsrf).mockImplementation(async (_path, input) => {
+    const saved = reply(input)
+    return { ...saved, status: 'SUCCEEDED', attempts: 1, facts: { ...saved.facts, publications: [publication],
+      metrics: [{ citationId: 'metric:1', workId: 'w', videoId: '0000123', source: 'DEMO_QA', observations: 1,
+        truncated: false, firstCapturedAt: point.capturedAt, previous: null, latest: point }] },
+      advice: { hypotheses: [], experiments: [{ proposedTopic: '线程池', action: '试拍', measurement: '同间隔观测', evidenceIds: ['account'] }] } }
+  })
+  const wrapper = mount(OperationReviewPanel, { props: { accountId: 'a' } })
+  await flushPromises(); await wrapper.get('[aria-label=复盘关键词]').setValue('线程池')
+  await wrapper.get('form').trigger('submit'); await flushPromises()
+  expect(wrapper.text()).toContain('复盘已保存')
+  expect(wrapper.text()).toContain('original-plan')
+  expect(wrapper.text()).toContain('未登记作品链接')
+  expect(wrapper.get('fieldset').attributes('disabled')).toBeUndefined()
+  expect(sessionStorage.getItem('creator-review-request:a')).toBeNull()
+  expect(postJsonWithCsrf).toHaveBeenCalledTimes(1)
   wrapper.unmount()
 })
 
@@ -134,6 +158,7 @@ it('renders facts, exact counts and traceable unverified advice while escaping s
   const point = { capturedAt: '2026-10-10T10:00:00Z', previousCapturedAt: null, views: '9223372036854775807', likes: null,
     commentCount: '0', viewsDelta: null, likesDelta: null, commentCountDelta: null, likeViewPercent: null, commentViewPercent: null, correction: false }
   vi.mocked(request).mockResolvedValueOnce([{ ...report, status: 'SUCCEEDED', attempts: 1, facts: { ...report.facts,
+    publications: [publication],
     metrics: [{ citationId: 'metric:1', workId: 'w', videoId: '0000123', source: 'DEMO_QA', observations: 1, truncated: false,
       firstCapturedAt: point.capturedAt, previous: null, latest: point }],
     evidence: { ...report.facts.evidence, commentStatus: 'MATCHED', comments: [{ citationId: 'comment:c1', workId: 'w', videoId: '0000123',
@@ -147,6 +172,10 @@ it('renders facts, exact counts and traceable unverified advice while escaping s
   expect(wrapper.text()).toContain('未知')
   expect(wrapper.text()).toContain('尚未证实')
   expect(wrapper.text()).toContain('尚未执行')
+  expect(wrapper.text()).toContain('original-plan')
+  expect(wrapper.text()).toContain('original-script')
+  expect(wrapper.text()).toContain('未登记作品链接')
+  expect(wrapper.findAll('a').some(link => link.text().includes('查看已登记作品'))).toBe(false)
   expect(wrapper.text()).toContain('<script>bad()</script>')
   expect(wrapper.find('script').exists()).toBe(false)
   expect(wrapper.find('a[href^="javascript:"]').exists()).toBe(false)

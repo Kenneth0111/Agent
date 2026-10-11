@@ -163,6 +163,8 @@ V4/V4.1/V4.2/V4.3 迁移保存选题、脚本、生成运行、失败节点、�
 
 同一区域的“每周定时复盘”可以保存每个账号的星期、整分钟时间、时区、关键词与启停状态，并读取周期执行记录及已保存报告。服务器每分钟扫描，窗口固定为计划时刻之前 7 个本地日；同一任务以当地周一日期去重，修改配置不替换已预约的周期请求。`REVIEW_JOBS_SCHEDULER_ENABLED` 默认 `false`，页面同时显示服务器扫描状态；账号启用和服务器开启缺一不可。手动复盘、定时复盘和既有后台生成共用付费执行锁，手动复盘可能等待繁忙任务，报告 GET/list 不等待此锁。中断周期同步标记任务和未终结报告为 `NEEDS_REVIEW`，保留事实和用量，不自动重发。[定时复盘验收](docs/qa/2026-10-11-w7-review-jobs.md)区分隔离执行验证与开发库暂停配置。
 
+[第七周验收](docs/qa/2026-10-11-w7-acceptance.md)汇总导入、数值口径、来源、报告与调度的证据。只登记作品 ID 的发布记录没有链接也能查看关联报告。[抖音官方接入现状](docs/douyin-access-status.md)记录主体、应用审核、用户授权及应用类型差异；当前仍从 CSV 取得观测，没有 OAuth/token/官方持续同步，也没有真实运营效果结论。
+
 [W3 内容联调记录](docs/qa/2026-09-25-w3-generation.md)包含 3 道 Java 题和 1 条英语跟读的核对结果。脚本时长目前只由提示词引导，正式发布前仍需人工检查。
 
 接入实现参考：[Spring Security 会话管理](https://docs.spring.io/spring-security/reference/6.5/servlet/authentication/session-management.html)、[CSRF](https://docs.spring.io/spring-security/reference/6.5/servlet/exploits/csrf.html)、[Redisson 配置](https://redisson.pro/docs/configuration/)、[Testcontainers MySQL](https://java.testcontainers.org/modules/databases/mysql/)、[LangChain4j MCP](https://docs.langchain4j.dev/tutorials/mcp/)。

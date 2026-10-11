@@ -48,6 +48,7 @@ function url(value: string | null) {
         <p>计划 {{ publication.planId }} · 项目 {{ publication.itemId }} · 站内登记 {{ stamp(publication.publishedAt) }}</p>
         <p>选题 {{ publication.topicId }} · 脚本 {{ publication.scriptId }} · 排期 {{ publication.scheduledDate }}</p>
         <a v-if="url(publication.publicationUrl)" :href="url(publication.publicationUrl)!" target="_blank" rel="noopener noreferrer">查看已登记作品 ↗</a>
+        <p v-else>未登记作品链接或链接不可用；保留原计划关联。</p>
       </div>
       <div class="limitations"><h4>样本与口径限制</h4><ul><li v-for="(limitation, index) in facts.limitations" :key="index">{{ limitation }}</li></ul></div>
     </template>

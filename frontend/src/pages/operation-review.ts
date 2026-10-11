@@ -14,7 +14,7 @@ export interface Report {
       referenceMaterials: { status: string; results: { materialId: string; title: string; snippet: string;
         sourceUrl: string | null; fileName: string | null; kind: string }[] } }
     publications: { workId: string; planId: string; itemId: string; topicId: string; scriptId: string;
-      publicationUrl: string; publishedAt: string; scheduledDate: string }[]
+      publicationUrl: string | null; publishedAt: string; scheduledDate: string }[]
   }
   advice: null | { hypotheses: { possibleExplanation: string; evidenceIds: string[] }[];
     experiments: { proposedTopic: string; action: string; measurement: string; evidenceIds: string[] }[] }
@@ -65,8 +65,8 @@ export function validReport(value: unknown, accountId: string): value is Report 
       || !object(evidence.referenceMaterials) || typeof evidence.referenceMaterials.status !== 'string'
       || !items(evidence.referenceMaterials.results, row => keys(row, ['materialId', 'title', 'snippet', 'kind'])
         && nullableString(row.sourceUrl) && nullableString(row.fileName))
-      || !items(facts.publications, row => keys(row, ['workId', 'planId', 'itemId', 'topicId', 'scriptId', 'publicationUrl', 'scheduledDate'])
-        && time(row.publishedAt))) return false
+      || !items(facts.publications, row => keys(row, ['workId', 'planId', 'itemId', 'topicId', 'scriptId', 'scheduledDate'])
+        && nullableString(row.publicationUrl) && time(row.publishedAt))) return false
   }
   return value.advice === null || object(value.advice)
     && items(value.advice.hypotheses, row => typeof row.possibleExplanation === 'string' && strings(row.evidenceIds))

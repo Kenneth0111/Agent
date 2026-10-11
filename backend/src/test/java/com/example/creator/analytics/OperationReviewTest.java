@@ -84,6 +84,14 @@ class OperationReviewTest extends IntegrationTestSupport {
         assertThat(publication.planId()).isEqualTo(week.id());
         assertThat(publication.itemId()).isEqualTo(assigned.id());
         assertThat(publication.scriptId()).isEqualTo(script);
+        var second = schedules.replaceDraft(fixture.owner(), week.items().get(1).id(), 1, topic, script);
+        schedules.setPublication(fixture.owner(), second.id(), second.version(), true, null, "0000123");
+        assertThat(facts.collect(fixture.owner(), request(fixture)).publications()).hasSize(2)
+                .anySatisfy(item -> {
+                    assertThat(item.itemId()).isEqualTo(second.id());
+                    assertThat(item.publicationUrl()).isNull();
+                    assertThat(item.scriptId()).isEqualTo(script);
+                });
     }
 
     @Test

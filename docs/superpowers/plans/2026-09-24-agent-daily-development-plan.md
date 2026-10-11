@@ -569,13 +569,15 @@ F03 中已执行的迁移为 `V1__users.sql`（W1-D2）、`V2__invitations.sql`�
 
   **当前证据：** 指标/评论 CSV 页面、报告页面、真实开发接口导入与 DeepSeek 手动复盘已验收；演示数据使用独立 DEMO 账号。每账号周复盘配置、固定窗口、扫描去重、重启核对与预算/模型公共链路已接入；定时模型路径使用隔离数据库及真实 HTTP 协议替身验证，开发库扫描保持关闭。详见 [页面验收](../../qa/2026-10-11-w7-data-ui.md)和[定时验收](../../qa/2026-10-11-w7-review-jobs.md)。本项完成不表示实际抖音运营效果、官方持续同步或未开启的生产调度已经验收。
 
-- [ ] **W7-D7｜周日｜3 小时｜第 7 周验收、复盘与机动**
+- [x] **W7-D7｜周日｜3 小时｜第 7 周验收、复盘与机动**
 
   **动作：** 用 1h 核对数据口径、缺失值、来源引用和生成建议；用 0.5h 记录官方接口申请条件与接入现状；保留 1.5h 修复计算或导入问题。
 
   **涉及文件：** T09、T10、F19。
 
   **完成标准：** 真实数据导入与复盘能力有证据；官方持续同步未接通时明确标注自动监控尚未验收。
+
+  **验收证据：** 第七周相关后端 verify 57 项通过；发现并修复合法无链接发布报告的前端拒绝，追加关联专项 6 项、前端 74 项及构建通过，独立复审通过。真实本机报告/引用/账本只读核对通过；实际 CSV 与 DeepSeek 手动链路使用明确标记的 DEMO 数据，官方自动采集和运营效果未验收。[周验收](../../qa/2026-10-11-w7-acceptance.md)、[官方接入现状](../../douyin-access-status.md)。
 
 **本周工时核对：** 5 × 1.5 + 4.5 + 3 = 15 小时，含 1.5 小时机动。
 
@@ -658,8 +660,9 @@ F03 中已执行的迁移为 `V1__users.sql`（W1-D2）、`V2__invitations.sql`�
 | W5 任务 | GET/POST `/api/tasks`；PATCH `/api/tasks/{taskId}`；GET `/api/tasks/{taskId}/runs` | taskType 为 WEEK_PLAN 或 OPERATION_REVIEW；weekStart + taskId 等稳定字段组成运行键；启停和时区属于本人配置 |
 | W5 用量 | GET `/api/usage?month=YYYY-MM` | 仅展示本人用量和额度；系统总预算由服务端统一核验 |
 | W6 通知 | GET/PUT `/api/notification-settings` | 渠道选择、邮箱与 Webhook 配置；读取时敏感字段脱敏，不能返回解密密钥 |
-| W7 导入 | POST `/api/imports/metrics/preview`；POST `/api/imports/{importId}/confirm` | 返回逐行错误与统计；确认阶段再次校验归属和重复键 |
-| W7 复盘 | GET `/api/analytics?accountId=...`；POST `/api/reviews`：accountId、from、to | 数值由后端计算；报告返回观测窗口、数据更新时间、来源和建议；任务仍使用统一运行记录 |
+| W7 导入 | POST `/api/metrics/import/preview`、`/confirm`；评论为同前缀 `/comments/preview`、`/comments/confirm` | 上传原 CSV 文件；返回逐条错误与统计；确认阶段再次校验归属和重复键 |
+| W7 复盘 | GET `/api/metrics/works?accountId=...` 和 `/api/metrics/works/{id}/trend?source=...`；POST `/api/metrics/reviews`：accountId、topic、from、to、requestId | 数值由后端计算；报告保存事实、来源和建议；GET 同报告路径可按账号列出或按 ID 读取；相同请求复用 |
+| W7 定时 | GET/PUT `/api/metrics/review-jobs/accounts/{accountId}`：dayOfWeek、localTime、timeZone、enabled、topic | 每账号周配置与独立触发记录；持久周期去重，复用报告图、ModelGateway/统一用量账本与后台执行锁 |
 
 ### 最小数据约定
 
