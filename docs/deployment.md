@@ -1,6 +1,6 @@
 # 腾讯云 / 宝塔部署记录
 
-当前阶段：**W8-D1 部署前准备，尚未连接腾讯云服务器。** 检查脚本已在本地隔离 Linux 容器验证；这里没有云端检查或部署成功的结论。
+当前阶段：**W8-D1 现场盘点待完成，W8-D2 本地打包与持久化验证已完成，尚未连接腾讯云服务器。** 以下候选配置没有云端检查或部署成功的结论。
 
 ## 现状与待核对项
 
@@ -59,7 +59,7 @@ W8-D1 的最终记录应包含：检查时间、系统、资源余量、现有�
 | 日任务 | 下一步交付 | 当前状态 |
 | --- | --- | --- |
 | W8-D1 | 现场盘点并确定入口、端口、目录 | 准备完成；现场结果待取得 |
-| W8-D2 | 镜像、Compose、持久化、内存约束与生产配置样例；本地构建和重启验证 | 尚未开发 |
+| W8-D2 | 镜像、Compose、持久化、内存约束与生产配置样例；本地构建和重启验证 | 本地验证通过；云端最终拓扑仍待盘点 |
 | W8-D3 | 在确认位置部署、迁移、健康及云端出网验证 | 尚未部署 |
 | W8-D4 | 同源 HTTPS、Cookie、登录 / 上传 / 长任务 / 通知链接验收 | 尚未验收 |
 | W8-D5 | 备份与隔离恢复，独立保存凭据恢复说明 | 尚未演练 |
@@ -74,4 +74,54 @@ W8-D1 的最终记录应包含：检查时间、系统、资源余量、现有�
 - DeepSeek、MCP 密钥留在后端，构建产物、镜像和 Git 不包含密钥。
 - 生成 / 复盘调度初始关闭；启用前完成模型预算配置和实际成本核对。真实 SMTP / 飞书仍待提供配置及验收。
 
-本地隔离验证见 [W8-D1 准备验收](qa/2026-10-11-w8-preflight.md)，总进度见 [固定进度页](PROGRESS.md)。
+## W8-D2 本地构建与候选配置
+
+文件：`backend/Dockerfile`、`frontend/Dockerfile`、`frontend/nginx.conf`、`deploy/compose.yml`、`deploy/.env.example`。Dockerfile 使用本机已构建的 JAR / dist，不在 4 GB 服务器安装 Maven、Node 或执行编译。两份 `.dockerignore` 只允许所需产物和配置进入构建上下文；基础镜像固定 digest，前后端以非 root 用户运行。
+
+候选方案使用本项目独立 MySQL / Redis 与命名卷，数据库所在网络为 internal。后端另接可出网的应用网络供未来调用模型 / MCP；不发布 MySQL、Redis 或后端端口。前端仅发布**经确认的本机端口**，可由宝塔站点代理，`/api/` 转发到后端。代理通过 Docker DNS 动态解析后端，前端健康检查同时覆盖静态页与 API，避免后端重建换 IP 后静态页仍显示健康却持续 502。
+
+这是用于本地验证的完整候选方案。若现场决定复用宝塔数据库，需调整连接、网络与依赖后重新验证；不能在未知服务器上直接启动独立数据库。当前并没有确定线上端口、目录、数据库方式或域名。
+
+初始容器上限为 MySQL 768 MiB、Redis 256 MiB、后端 1024 MiB、前端 64 MiB，共 2112 MiB；后端 JVM 最大堆使用容器内存的 50%，另有临时目录限制。Redis 采用 AOF、96 MiB 数据上限及 noeviction，内存不足会拒绝写入而非随意淘汰会话 / 锁。所有服务限制日志文件大小和数量。这些是本地起点，**不是目标服务器容量实测**；已有服务、Docker 和系统仍需额外资源。
+
+### 构建顺序
+
+本机先启动 Docker（后端 verify 使用独立 Testcontainers 测试库），再在项目根目录执行，检查每条命令退出码为 0 后再继续：
+
+```powershell
+mvn -f backend/pom.xml verify
+npm --prefix frontend ci
+npm --prefix frontend run build
+```
+
+Maven 产物为 `backend/target/creator-agent-0.1.0-SNAPSHOT.jar`，前端为 `frontend/dist`；版本号变更时同步 Dockerfile 的文件名。只构建过时产物会得到过时镜像，不能跳过前面的构建。镜像不能代替数据库备份。
+
+创建独立、忽略的 `deploy/.env`，参考 `deploy/.env.example` 填写新的密码与通知加密密钥、镜像标签、经确认的端口和公开网址。不复制开发 `.env`，不使用 `dev` profile。`docker compose config` 默认会展开凭据，因此只用 `--quiet` 检查，不要将完整输出贴进聊天或提交。
+
+```powershell
+docker compose --env-file deploy/.env -f deploy/compose.yml config --quiet
+docker compose --env-file deploy/.env -f deploy/compose.yml build
+```
+
+仅在**本地隔离测试机或已完成盘点的目标环境**启动，使用同一项目名识别其容器和卷：
+
+```powershell
+docker compose --env-file deploy/.env -f deploy/compose.yml -p creator-agent-release up -d --wait --wait-timeout 240
+docker compose --env-file deploy/.env -f deploy/compose.yml -p creator-agent-release ps
+docker compose --env-file deploy/.env -f deploy/compose.yml -p creator-agent-release stop
+docker compose --env-file deploy/.env -f deploy/compose.yml -p creator-agent-release up -d --wait --wait-timeout 240
+```
+
+`stop` 保留容器和卷；`down` 不带 `--volumes` 也保留命名卷。重建时保持相同项目名和环境凭据；更换项目名会得到另一组卷，更换环境密码不会自动重置已初始化数据库密码。禁止用 `down --volumes` 或卷清理作为重启步骤。
+
+### 本地已验证的边界
+
+- 测试项目固定为 `creator-agent-w8-package`，新生成的凭据位于忽略目录 `.local/w8-package.env`；使用 `127.0.0.1:18980` 和 HTTP，因此只在该测试中设置 Cookie Secure=false。生产样例默认 true。
+- 四个容器健康，迁移到 V7.2；非 dev 环境没有自动生成开发用户。测试邀请码只在隔离库创建，并通过真实 `/api` 完成注册、登录、CSRF、账号及资料写入。
+- 停止 / 启动和删除容器 / 重建均保留业务记录、Redis 标记及登录会话。最后移除测试容器与网络，保留测试命名卷；现有开发 MySQL / Redis 继续健康。
+- 独立重建后端、强制改变其 IP 时，保持前端容器不变，API 健康和 CSRF 读取自动恢复。解析缓存有效期和单次解析超时均为 5 秒；这不表示容器更新零停机，也不承诺所有环境 5 秒内恢复。
+- 本地镜像为 linux/amd64。实际服务器架构尚未核对，不能直接认定这些镜像可用于 ARM 服务器。
+- 模型 / MCP 密钥未配置，调度关闭；没有调用外部模型或发送通知。预算开关开启，未核对费用时留空单价，使相应付费操作受阻。此处没有验收云端出网、真实通知、HTTPS 或长任务。
+- 当前 PDF / 文本资料正文保存在 MySQL，原上传文件不单独保留，因此此版本没有额外资料文件卷。备份需保存数据库和独立加密密钥；恢复演练仍属于 W8-D5。
+
+非 root NGINX 基础镜像的 8080 端口及 `/tmp` 临时路径依据 [NGINX 项目说明](https://github.com/nginx/docker-nginx-unprivileged)，动态解析依据 [NGINX upstream resolve / resolver 说明](https://nginx.org/en/docs/http/ngx_http_upstream_module.html#server)，Java 运行镜像采用 [Eclipse Temurin 官方镜像](https://hub.docker.com/_/eclipse-temurin)。本地构建和运行验证见 [W8-D2 验收](qa/2026-10-11-w8-packaging.md)，只读盘点见 [W8-D1 准备验收](qa/2026-10-11-w8-preflight.md)，总进度见 [固定进度页](PROGRESS.md)。
