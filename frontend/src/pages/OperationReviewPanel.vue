@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { HttpError, postJsonWithCsrf, request } from '../api/http'
 import OperationReport from './OperationReport.vue'
+import ReviewSchedulePanel from './ReviewSchedulePanel.vue'
 import { statusLabel, validReport, validRequest, type Report, type ReviewRequest } from './operation-review'
 const props = defineProps<{ accountId: string }>()
 const reports = ref<Report[]>([])
@@ -76,6 +77,19 @@ async function generate() {
     }
   } finally { if (current === selection) generating.value = false }
 }
+async function openSavedReport(id: string) {
+  const current = selection
+  const read = ++reads
+  loading.value = true; error.value = ''
+  try {
+    const result = await request(`/api/metrics/reviews/${encodeURIComponent(id)}`)
+    if (current !== selection || read !== reads) return
+    if (!validReport(result, props.accountId) || result.id !== id) throw new Error('Invalid saved report')
+    reports.value = [result, ...reports.value.filter(report => report.id !== id)].slice(0, 20)
+    selectedId.value = id
+  } catch { if (current === selection && read === reads) error.value = '暂时无法读取该报告，请刷新重试。' }
+  finally { if (current === selection && read === reads) loading.value = false }
+}
 watch(() => props.accountId, () => {
   selection++; reads++; reports.value = []; selectedId.value = ''; error.value = ''; generating.value = false; loading.value = false
   unresolved.value = null
@@ -108,6 +122,7 @@ onBeforeUnmount(() => { selection++; reads++ })
       <option v-for="report in reports" :key="report.id" :value="report.id">{{ report.request.topic }} · {{ new Date(report.createdAt).toLocaleString('zh-CN') }} · {{ statusLabel(report.status) }}</option>
     </select></label>
     <OperationReport v-if="selected" :report="selected" />
+    <ReviewSchedulePanel :account-id="accountId" @report="openSavedReport" />
   </section>
 </template>
 

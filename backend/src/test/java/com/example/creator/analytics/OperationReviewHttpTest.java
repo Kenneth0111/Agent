@@ -23,6 +23,42 @@ import static org.assertj.core.api.Assertions.assertThat;
 class OperationReviewHttpTest extends IntegrationTestSupport {
     @LocalServerPort private int port;
     @Autowired private ObjectMapper json;
+    @Autowired private ReviewJobScanner scanner;
+
+    @Test
+    void weeklyJobSettingsAndRecordsAreCsrfProtectedAndOwnerScopedWithTheServerPaused() throws Exception {
+        var a = client(); var b = client();
+        login(a, "creator-a@example.test"); login(b, "creator-b@example.test");
+        var created = post(a, "/api/accounts", "application/json", """
+                {"name":"DEMO 定时 HTTP","audience":"程序员","positioning":"Java","columns":["Java 面试"],"weeklyTarget":2}
+                """, true);
+        var accountId = json.readTree(created.body()).get("id").asText();
+        var path = "/api/metrics/review-jobs/accounts/" + accountId;
+        var empty = json.readTree(get(a, path).body());
+        assertThat(empty.get("job").isNull()).isTrue();
+        assertThat(empty.get("schedulerEnabled").asBoolean()).isFalse();
+        var input = """
+                {"dayOfWeek":7,"localTime":"09:00","timeZone":"Asia/Shanghai","enabled":true,"topic":"线程池"}
+                """;
+        assertThat(get(b, path).statusCode()).isEqualTo(404);
+        assertThat(get(client(), path).statusCode()).isEqualTo(401);
+        assertThat(send(a, path, "application/json", input, false, "PUT").statusCode()).isEqualTo(403);
+        assertThat(send(b, path, "application/json", input, true, "PUT").statusCode()).isEqualTo(404);
+        assertThat(send(a, path, "application/json", input.replace("Asia/Shanghai", "Bad/Zone"), true, "PUT").statusCode()).isEqualTo(400);
+        var saved = json.readTree(send(a, path, "application/json", input, true, "PUT").body());
+        var jobId = saved.get("job").get("id").asText();
+        assertThat(saved.get("triggers")).isEmpty();
+        scanner.scheduledScan();
+        assertThat(json.readTree(get(a, path).body()).get("triggers")).isEmpty();
+        scanner.scanDue(java.time.Instant.parse("2026-10-11T01:05:00Z"));
+        var trigger = json.readTree(get(a, path).body()).get("triggers").get(0);
+        assertThat(trigger.get("status").asText()).isEqualTo("INSUFFICIENT_DATA");
+        assertThat(get(a, "/api/metrics/reviews/" + trigger.get("reportId").asText()).statusCode()).isEqualTo(200);
+        assertThat(get(b, "/api/metrics/reviews/" + trigger.get("reportId").asText()).statusCode()).isEqualTo(404);
+        var disabled = json.readTree(send(a, path, "application/json", input.replace("true", "false"), true, "PUT").body());
+        assertThat(disabled.get("job").get("id").asText()).isEqualTo(jobId);
+        assertThat(disabled.get("triggers")).hasSize(1);
+    }
 
     @Test
     void savesAndReplaysAnOwnedReportWithCsrfAndHidesItFromOtherUsers() throws Exception {
@@ -57,12 +93,15 @@ class OperationReviewHttpTest extends IntegrationTestSupport {
                 "email=" + email + "&password=development-fixture-only", true).statusCode()).isEqualTo(204);
     }
     private HttpResponse<String> post(HttpClient client, String path, String type, String body, boolean csrf) throws Exception {
+        return send(client, path, type, body, csrf, "POST");
+    }
+    private HttpResponse<String> send(HttpClient client, String path, String type, String body, boolean csrf, String method) throws Exception {
         var builder = HttpRequest.newBuilder(uri(path)).header("Content-Type", type);
         if (csrf) {
             var token = json.readTree(get(client, "/api/auth/csrf").body());
             builder.header(token.get("headerName").asText(), token.get("token").asText());
         }
-        return client.send(builder.POST(HttpRequest.BodyPublishers.ofString(body)).build(), HttpResponse.BodyHandlers.ofString());
+        return client.send(builder.method(method, HttpRequest.BodyPublishers.ofString(body)).build(), HttpResponse.BodyHandlers.ofString());
     }
     private HttpResponse<String> get(HttpClient client, String path) throws Exception {
         return client.send(HttpRequest.newBuilder(uri(path)).GET().build(), HttpResponse.BodyHandlers.ofString());

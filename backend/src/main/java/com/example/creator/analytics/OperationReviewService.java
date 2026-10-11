@@ -6,20 +6,30 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import org.redisson.api.RedissonClient;
 import org.springframework.stereotype.Service;
 
 @Service
 public class OperationReviewService {
     private final ReviewStore store;
     private final OperationReviewGraph graph;
+    private final RedissonClient redisson;
 
-    OperationReviewService(ReviewStore store, OperationReviewGraph graph) {
+    OperationReviewService(ReviewStore store, OperationReviewGraph graph, RedissonClient redisson) {
         this.store = store;
         this.graph = graph;
+        this.redisson = redisson;
     }
 
     public OperationReview.Report generate(long ownerId, OperationReview.Request request) {
         var input = validate(request);
+        var lock = redisson.getLock("generation:paid");
+        lock.lock();
+        try {
+            return execute(ownerId, input);
+        } finally { lock.unlock(); }
+    }
+    private OperationReview.Report execute(long ownerId, OperationReview.Request input) {
         var reserved = store.reserve(ownerId, input);
         if (!reserved.created()) return reserved.report();
         try { return graph.run(ownerId, reserved.report().id(), input); }

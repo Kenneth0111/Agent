@@ -5,9 +5,12 @@ import com.example.creator.account.AccountService;
 import com.example.creator.analytics.ImportService;
 import com.example.creator.analytics.OperationReview;
 import com.example.creator.analytics.OperationReviewService;
+import com.example.creator.analytics.ReviewJobStore;
+import com.example.creator.analytics.ReviewJobScanner;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.Duration;
+import java.time.LocalTime;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
@@ -15,6 +18,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -47,6 +51,13 @@ class OperationReviewIntegrationTest extends IntegrationTestSupport {
     @Autowired private ImportService imports;
     @Autowired private OperationReviewService reviews;
     @Autowired private UsageLedger usage;
+    @Autowired private ReviewJobStore jobs;
+    @Autowired private ReviewJobScanner scanner;
+    private final java.util.ArrayList<Fixture> fixtures = new java.util.ArrayList<>();
+    @AfterEach void disableJobs() {
+        for (var fixture : fixtures) jobs.findByAccount(fixture.owner(), fixture.account()).ifPresent(job ->
+                jobs.save(fixture.owner(), fixture.account(), new ReviewJobStore.Input(job.dayOfWeek(), job.localTime(), job.timeZone(), false, job.topic())));
+    }
     private static final String VALID = """
             {"hypotheses":[{"possibleExplanation":"选题可能吸引了关注，仍需更多样本验证。","evidenceIds":["metric:1"]}],
              "experiments":[{"proposedTopic":"线程池拒绝策略快问快答","action":"试拍不同开头的内容。",
@@ -165,6 +176,49 @@ class OperationReviewIntegrationTest extends IntegrationTestSupport {
         assertThat(PROVIDER.calls() - calls).isEqualTo(1);
     }
 
+    @Test
+    void scheduledReviewsReuseTheGraphAndLedgerWithOneCallAcrossRepeatedScans() {
+        var fixture = fixture(); var calls = PROVIDER.calls();
+        var job = jobs.save(fixture.owner(), fixture.account(), new ReviewJobStore.Input(7, LocalTime.of(9, 0), "Asia/Shanghai", true, "线程池"));
+        scanner.scanDue(Instant.parse("2026-10-11T01:05:00Z"));
+        scanner.scanDue(Instant.parse("2026-10-11T03:00:00Z"));
+        var trigger = jobs.triggers(fixture.owner(), job.id()).getFirst();
+        assertThat(trigger.status()).isEqualTo("SUCCEEDED");
+        assertThat(jobs.triggers(fixture.owner(), job.id())).hasSize(1);
+        var report = reviews.find(fixture.owner(), trigger.reportId()).orElseThrow();
+        assertThat(report.facts().metrics().getFirst().latest().viewsDelta()).isEqualTo("50");
+        assertThat(PROVIDER.calls() - calls).isEqualTo(1);
+        assertThat(usage.recent(fixture.owner())).hasSize(1);
+        assertThat(usage.recent(fixture.owner()).getFirst().taskId()).isEqualTo(report.id());
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {401, 503})
+    void scheduledProviderFailureDoesNotRetryWithinTheWeek(int status) {
+        var fixture = fixture(); var calls = PROVIDER.calls();
+        PROVIDER.failWithStatus(status);
+        var job = jobs.save(fixture.owner(), fixture.account(), new ReviewJobStore.Input(7, LocalTime.of(9, 0), "Asia/Shanghai", true, "线程池"));
+        scanner.scanDue(Instant.parse("2026-10-11T01:05:00Z"));
+        scanner.reconcile(); scanner.scanDue(Instant.parse("2026-10-11T03:00:00Z"));
+        assertThat(jobs.triggers(fixture.owner(), job.id())).hasSize(1);
+        assertThat(jobs.triggers(fixture.owner(), job.id()).getFirst().status()).isEqualTo(status == 401 ? "FAILED" : "NEEDS_REVIEW");
+        assertThat(PROVIDER.calls() - calls).isEqualTo(1);
+    }
+
+    @Test
+    void scheduledTimeoutKeepsFactsAndNeverResendsThePaidCall() {
+        var fixture = fixture(); var calls = PROVIDER.calls();
+        PROVIDER.delayEachReply(Duration.ofSeconds(3));
+        var job = jobs.save(fixture.owner(), fixture.account(), new ReviewJobStore.Input(7, LocalTime.of(9, 0), "Asia/Shanghai", true, "线程池"));
+        scanner.scanDue(Instant.parse("2026-10-11T01:05:00Z"));
+        scanner.reconcile(); scanner.scanDue(Instant.parse("2026-10-11T03:00:00Z"));
+        var trigger = jobs.triggers(fixture.owner(), job.id()).getFirst();
+        assertThat(trigger.status()).isEqualTo("NEEDS_REVIEW");
+        assertThat(trigger.errorCode()).isEqualTo("MODEL_TIMEOUT");
+        assertThat(reviews.find(fixture.owner(), trigger.reportId()).orElseThrow().facts().metrics()).hasSize(1);
+        assertThat(PROVIDER.calls() - calls).isEqualTo(1);
+    }
+
     private OperationReview.Request input(Fixture fixture) {
         return new OperationReview.Request(fixture.account(), "线程池", Instant.parse("2026-10-10T00:00:00Z"),
                 Instant.parse("2026-10-11T00:00:00Z"), UUID.randomUUID().toString());
@@ -179,7 +233,9 @@ class OperationReviewIntegrationTest extends IntegrationTestSupport {
                 + account.id() + ",video,2026-10-10T10:00:00Z,100,5,,DEMO\n"
                 + account.id() + ",video,2026-10-10T11:00:00Z,150,,2,DEMO\n";
         imports.confirm(owner, csv.getBytes(StandardCharsets.UTF_8));
-        return new Fixture(owner, account.id());
+        var fixture = new Fixture(owner, account.id());
+        fixtures.add(fixture);
+        return fixture;
     }
     private record Fixture(long owner, String account) { }
 }

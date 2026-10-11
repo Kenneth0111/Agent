@@ -4,6 +4,8 @@ import OperationReviewPanel from './OperationReviewPanel.vue'
 import { postJsonWithCsrf, request } from '../api/http'
 import type { ReviewRequest } from './operation-review'
 
+vi.mock('./ReviewSchedulePanel.vue', () => ({ default: { template: '<button data-saved-report @click="$emit(\'report\', \'r1\')">查看已保存报告</button>' } }))
+
 vi.mock('../api/http', async importOriginal => ({ ...await importOriginal<typeof import('../api/http')>(), request: vi.fn(), postJsonWithCsrf: vi.fn() }))
 const report = { id: 'r1', accountId: 'a', status: 'INSUFFICIENT_DATA', attempts: 0, errorCode: null,
   createdAt: '2026-10-11T10:00:00Z', request: { accountId: 'a', topic: '线程池', from: '2026-10-04T00:00:00Z', to: '2026-10-11T00:00:00Z', requestId: 'key' },
@@ -32,6 +34,16 @@ it('loads saved reports without model calls and generates an explicit cold-start
   expect(vi.mocked(postJsonWithCsrf).mock.calls[0]?.[0]).toBe('/api/metrics/reviews')
   expect(wrapper.text()).toContain('样本不足，已跳过模型')
   expect(wrapper.text()).toContain('缺少指标依据')
+  wrapper.unmount()
+})
+
+it('opens a scheduled report by its owned id without generating a new report', async () => {
+  vi.mocked(request).mockImplementation(async path => path === '/api/metrics/reviews/r1' ? report : [])
+  const wrapper = mount(OperationReviewPanel, { props: { accountId: 'a' } })
+  await flushPromises(); await wrapper.get('[data-saved-report]').trigger('click'); await flushPromises()
+  expect(request).toHaveBeenCalledWith('/api/metrics/reviews/r1')
+  expect(wrapper.text()).toContain('样本不足，已跳过模型')
+  expect(postJsonWithCsrf).not.toHaveBeenCalled()
   wrapper.unmount()
 })
 

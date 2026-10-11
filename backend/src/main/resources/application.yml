@@ -47,6 +47,8 @@ creator:
     monthly-system-budget-cny: ${SYSTEM_MONTHLY_BUDGET_CNY:100}
   jobs:
     scheduler-enabled: ${GENERATION_JOBS_SCHEDULER_ENABLED:false}
+  reviews:
+    scheduler-enabled: ${REVIEW_JOBS_SCHEDULER_ENABLED:false}
   notification:
     encryption-key: ${NOTIFICATION_ENCRYPTION_KEY:}
     public-url: ${CREATOR_PUBLIC_BASE_URL:http://127.0.0.1:5173/}
