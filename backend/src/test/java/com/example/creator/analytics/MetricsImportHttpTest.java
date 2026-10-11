@@ -41,6 +41,10 @@ class MetricsImportHttpTest extends IntegrationTestSupport {
         var preview = upload(a, "preview", csv, true);
         assertThat(preview.statusCode()).isEqualTo(200);
         assertThat(json.readTree(preview.body()).get("canImport").asBoolean()).isTrue();
+        var largePreview = json.readTree(upload(a, "preview", csv.replace(",100,0,,", ",9223372036854775807,0,,"), true).body());
+        assertThat(largePreview.get("rows").get(0).get("data").get("views").isTextual()).isTrue();
+        assertThat(largePreview.get("rows").get(0).get("data").get("views").asText()).isEqualTo("9223372036854775807");
+        assertThat(largePreview.get("rows").get(0).get("data").get("commentCount").isNull()).isTrue();
         assertThat(upload(client(), "preview", csv, true).statusCode()).isEqualTo(401);
         assertThat(upload(a, "confirm", csv, false).statusCode()).isEqualTo(403);
         var foreign = upload(b, "preview", csv, true);

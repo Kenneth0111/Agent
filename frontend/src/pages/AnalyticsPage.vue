@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { request } from '../api/http'
+import MetricsImportPanel from './MetricsImportPanel.vue'
+import OperationReviewPanel from './OperationReviewPanel.vue'
 
 interface Account { id: string; name: string }
 interface Work { id: string; videoId: string; sources: string[] }
@@ -135,6 +137,7 @@ onBeforeUnmount(() => { revision++ })
         <option v-for="item in sources" :key="item" :value="item">{{ item }}</option>
       </select></label>
     </div>
+    <MetricsImportPanel v-if="accountId" :account-id="accountId" @imported="loadWorks" />
     <p v-if="error" class="error" role="alert">{{ error }}</p>
     <p v-else-if="pending" role="status">正在读取观测记录…</p>
     <p v-else-if="!accounts.length" class="empty">先创建内容账号，再记录作品数据。</p>
@@ -164,6 +167,7 @@ onBeforeUnmount(() => { revision++ })
       </div>
       <p class="explanation">未知值保持为空；首次观测没有变化量。比值是累计点赞或评论除以累计播放，缺少数据或播放为 0 时不可计算。观测间隔不同，变化量不能直接用于比较增长速度。</p>
     </template>
+    <OperationReviewPanel v-if="accountId" :account-id="accountId" />
   </section>
 </template>
 

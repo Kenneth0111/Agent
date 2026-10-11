@@ -1,5 +1,6 @@
 package com.example.creator.analytics;
 
+import com.fasterxml.jackson.annotation.JsonFormat;
 import java.io.IOException;
 import java.io.StringReader;
 import java.io.UncheckedIOException;
@@ -170,7 +171,9 @@ public class ImportService {
     }
 
     public record MetricRow(int rowNumber, String accountId, String videoId, Instant capturedAt,
-                            Long views, Long likes, Long commentCount, String source) { }
+                            @JsonFormat(shape = JsonFormat.Shape.STRING) Long views,
+                            @JsonFormat(shape = JsonFormat.Shape.STRING) Long likes,
+                            @JsonFormat(shape = JsonFormat.Shape.STRING) Long commentCount, String source) { }
     public record RowResult(int rowNumber, String status, String errorCode, MetricRow data) { }
     public record Preview(boolean canImport, List<RowResult> rows) { }
     public record ImportResult(int imported, int duplicates, List<RowResult> rows) { }

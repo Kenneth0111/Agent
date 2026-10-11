@@ -1,5 +1,5 @@
 export class HttpError extends Error {
-  constructor(readonly status: number, readonly code?: string) { super(code ?? `HTTP ${status}`) }
+  constructor(readonly status: number, readonly code?: string, readonly body?: unknown) { super(code ?? `HTTP ${status}`) }
 }
 
 export async function request(path: string, options: RequestInit = {}, timeoutMs = 10_000): Promise<unknown> {
@@ -13,7 +13,7 @@ export async function request(path: string, options: RequestInit = {}, timeoutMs
         const body: unknown = await response.json()
         const code = typeof body === 'object' && body !== null && 'code' in body && typeof body.code === 'string'
           ? body.code : undefined
-        throw new HttpError(response.status, code)
+        throw new HttpError(response.status, code, body)
       } catch (cause) {
         if (cause instanceof HttpError) throw cause
         throw new HttpError(response.status)

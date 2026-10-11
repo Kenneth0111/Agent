@@ -21,7 +21,7 @@ beforeEach(() => {
 
 describe('video observations', () => {
   it('distinguishes unknown from zero and never invents a first observation delta', async () => {
-    const wrapper = mount(AnalyticsPage)
+    const wrapper = mount(AnalyticsPage, { global: { stubs: { OperationReviewPanel: true } } })
     await flushPromises()
     expect(wrapper.get('#metrics-account').element).toBeDefined()
     expect(wrapper.get('#metrics-work').text()).toContain('0000123')
@@ -39,7 +39,7 @@ describe('video observations', () => {
         { ...point, previousCapturedAt: '2026-10-10T09:00:00Z', views: '9223372036854775807',
           likes: '1', viewsDelta: '-10', likesDelta: '0', likeViewPercent: '0.000000', correction: true },
       ] })
-    const wrapper = mount(AnalyticsPage)
+    const wrapper = mount(AnalyticsPage, { global: { stubs: { OperationReviewPanel: true } } })
     await flushPromises()
     expect(wrapper.get('.metric-summary').text()).toContain('9223372036854775807')
     expect(wrapper.get('tbody').text()).toContain('-10')
@@ -57,7 +57,7 @@ describe('video observations', () => {
       : path === '/api/metrics/works?accountId=b' ? []
         : path.startsWith('/api/metrics/works?') ? works
           : path.endsWith('source=OTHER') ? delayed : trend)
-    const wrapper = mount(AnalyticsPage)
+    const wrapper = mount(AnalyticsPage, { global: { stubs: { OperationReviewPanel: true } } })
     await flushPromises()
     await wrapper.get('#metrics-source').setValue('OTHER')
     await wrapper.get('#metrics-account').setValue('b')
@@ -71,7 +71,7 @@ describe('video observations', () => {
   })
 
   it('shows read failures separately from an empty account and allows refresh', async () => {
-    const wrapper = mount(AnalyticsPage)
+    const wrapper = mount(AnalyticsPage, { global: { stubs: { OperationReviewPanel: true } } })
     await flushPromises()
     vi.mocked(request).mockRejectedValueOnce(new Error('offline'))
     await wrapper.get('button').trigger('click')
@@ -88,7 +88,7 @@ describe('video observations', () => {
   it('rejects a trend response for a different source instead of displaying it', async () => {
     vi.mocked(request).mockImplementation(async path => path === '/api/accounts' ? accounts
       : path.startsWith('/api/metrics/works?') ? works : { ...trend, source: 'FOREIGN' })
-    const wrapper = mount(AnalyticsPage)
+    const wrapper = mount(AnalyticsPage, { global: { stubs: { OperationReviewPanel: true } } })
     await flushPromises()
     expect(wrapper.get('[role="alert"]').text()).toContain('无法读取观测记录')
     expect(wrapper.find('.metric-summary').exists()).toBe(false)
