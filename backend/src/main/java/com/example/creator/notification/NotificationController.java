@@ -1,6 +1,7 @@
 package com.example.creator.notification;
 
 import com.example.creator.auth.CurrentUser;
+import java.util.List;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -22,6 +23,11 @@ public class NotificationController {
     @GetMapping
     public NotificationService.SettingsView settings() {
         return notifications.settings(currentUser.id());
+    }
+
+    @GetMapping("/deliveries")
+    public List<NotificationService.DeliveryView> deliveries() {
+        return notifications.deliveries(currentUser.id());
     }
 
     @PutMapping

@@ -8,11 +8,13 @@ import MaterialsPage from './pages/MaterialsPage.vue'
 import GenerationPage from './pages/GenerationPage.vue'
 import SchedulePage from './pages/SchedulePage.vue'
 import OperationsPage from './pages/OperationsPage.vue'
+import NotificationPage from './pages/NotificationPage.vue'
 
 const connection = ref<'checking' | 'connected' | 'unavailable'>('checking')
 const signedIn = ref(false)
 const registering = ref(false)
 const accountRevision = ref(0)
+const linkedRunId = new URLSearchParams(window.location.search).get('run')
 const connectionLabel = computed(() => ({
   checking: '正在连接服务',
   connected: '服务已连接',
@@ -62,9 +64,10 @@ onBeforeUnmount(() => controller?.abort())
       <AccountsPage v-if="signedIn" @changed="accountRevision++" />
       <MaterialsPage v-if="signedIn" />
       <ChatPage v-if="signedIn" :key="accountRevision" />
-      <GenerationPage v-if="signedIn" :key="accountRevision" />
+      <GenerationPage v-if="signedIn" :key="accountRevision" :linked-run-id="linkedRunId" />
       <SchedulePage v-if="signedIn" :key="accountRevision" />
       <OperationsPage v-if="signedIn" :key="accountRevision" />
+      <NotificationPage v-if="signedIn" />
 
       <section class="preparation" aria-labelledby="preparation-title">
         <div class="preparation-copy">

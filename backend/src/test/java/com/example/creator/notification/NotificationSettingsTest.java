@@ -20,6 +20,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
@@ -44,6 +45,7 @@ class NotificationSettingsTest extends IntegrationTestSupport {
     @Autowired private AccountService accounts;
     @Autowired private ContentService content;
     @Autowired private GenerationJobsService jobs;
+    @Autowired private PasswordEncoder passwords;
     @MockitoBean private GenerationService generation;
     @MockitoBean private EmailSender emails;
     @MockitoBean private FeishuSender feishu;
@@ -70,6 +72,7 @@ class NotificationSettingsTest extends IntegrationTestSupport {
                 "test-token", "sign-secret", "NOTIFICATION_ENCRYPTION_KEY");
         assertThat(get(a, "/api/notification-settings").body()).isEqualTo(saved.body());
         assertThat(get(b, "/api/notification-settings").body()).doesNotContain("owner@example.test");
+        assertThat(get(a, "/api/notification-settings/deliveries").body()).isEqualTo("[]");
         var ownerId = jdbc.queryForObject("SELECT id FROM users WHERE email = ?", Long.class,
                 "creator-a@example.test");
         var ciphertext = jdbc.queryForObject("SELECT smtp_password_enc FROM notification_settings "
@@ -83,10 +86,10 @@ class NotificationSettingsTest extends IntegrationTestSupport {
     }
 
     @Test
-    void successfulJobQueuesConfiguredChannelsButFailedJobDoesNot() {
+    void successfulJobQueuesConfiguredChannelsButFailedJobDoesNot() throws Exception {
         var email = UUID.randomUUID() + "@example.test";
         jdbc.update("INSERT INTO users (email, password_hash, display_name) VALUES (?, ?, ?)",
-                email, "test-only", "通知验收");
+                email, passwords.encode("development-fixture-only"), "通知验收");
         var owner = jdbc.queryForObject("SELECT id FROM users WHERE email = ?", Long.class, email);
         notifications.save(owner, new NotificationService.SettingsInput("owner@example.test", "sender@example.test", true,
                 "smtp.example.test", 587, "smtp-user", "smtp-secret", true,
@@ -109,6 +112,20 @@ class NotificationSettingsTest extends IntegrationTestSupport {
         assertThat(jdbc.queryForList("SELECT channel FROM notification_deliveries "
                 + "WHERE owner_id = ? AND trigger_id = ? ORDER BY channel", String.class, owner,
                 trigger.id())).containsExactly("EMAIL", "FEISHU");
+        assertThat(notifications.deliveries(owner)).hasSize(2);
+        assertThat(notifications.deliveries(owner + 999_999)).isEmpty();
+        var ownerClient = client();
+        var otherClient = client();
+        login(ownerClient, email);
+        login(otherClient, "creator-b@example.test");
+        var ownedDeliveries = get(ownerClient, "/api/notification-settings/deliveries");
+        assertThat(ownedDeliveries.statusCode()).isEqualTo(200);
+        assertThat(ownedDeliveries.body()).contains(completed.id(), "PENDING")
+                .doesNotContain("smtp-secret", "smtp-user", "test-token", "sign-secret");
+        assertThat(get(otherClient, "/api/notification-settings/deliveries").body())
+                .doesNotContain(completed.id());
+        assertThat(get(ownerClient, "/api/generations/" + completed.id()).statusCode()).isEqualTo(200);
+        assertThat(get(otherClient, "/api/generations/" + completed.id()).statusCode()).isEqualTo(404);
         assertThat(jdbc.queryForList("SELECT DISTINCT status FROM notification_deliveries "
                 + "WHERE owner_id = ?", String.class, owner)).containsExactly("PENDING");
         assertThatThrownBy(() -> jobs.trigger(owner, job.id(), GenerationJobsService.TriggerSource.MANUAL))

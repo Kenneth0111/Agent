@@ -1,6 +1,7 @@
 package com.example.creator.notification;
 
 import java.net.URI;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -60,6 +61,17 @@ public class NotificationService {
         var settings = stored(ownerId);
         if (settings.emailEnabled()) insert(ownerId, triggerId, runId, "EMAIL");
         if (settings.feishuEnabled()) insert(ownerId, triggerId, runId, "FEISHU");
+    }
+
+    public List<DeliveryView> deliveries(long ownerId) {
+        return jdbc.query("""
+                SELECT id, generation_run_id, channel, status, error_code, created_at
+                FROM notification_deliveries WHERE owner_id = ?
+                ORDER BY created_at DESC, id DESC LIMIT 20
+                """, (row, ignored) -> new DeliveryView(row.getString("id"),
+                row.getString("generation_run_id"), row.getString("channel"),
+                row.getString("status"), row.getString("error_code"),
+                row.getTimestamp("created_at").toInstant()), ownerId);
     }
 
     Optional<EmailDelivery> claimEmail(long ownerId, String triggerId) {
@@ -201,6 +213,8 @@ public class NotificationService {
                                Integer smtpPort, boolean smtpUsernameConfigured,
                                boolean smtpPasswordConfigured, boolean feishuEnabled,
                                boolean feishuWebhookConfigured, boolean feishuSecretConfigured) { }
+    public record DeliveryView(String id, String runId, String channel, String status,
+                               String errorCode, Instant createdAt) { }
     record EmailDelivery(String id, String runId, String recipient, String from,
                          String host, int port, String usernameEnc, String passwordEnc) { }
     record FeishuDelivery(String id, String runId, String webhookEnc, String secretEnc) { }

@@ -147,6 +147,8 @@ V4/V4.1/V4.2/V4.3 迁移保存选题、脚本、生成运行、失败节点、�
 
 投递记录按任务触发与渠道唯一。发送前原子领取记录，避免重复消费再次发送；飞书明确返回 HTTP 429 时在 1 分钟、5 分钟后最多自动补发两次。传输结果不明与进程中断的投递标为 `UNKNOWN`，不自动重发，以免重复通知。
 
+工作台的“通知设置”可独立启停邮件和飞书、更新凭据并查看最近 20 条本人投递记录。已保存的凭据输入留空则保留，保存成功后清空页面中的新凭据；刷新投递状态不会清空未保存输入。`GET /api/notification-settings/deliveries` 不返回凭据。通知中的 `?run=运行ID` 链接在登录后查询所属运行、切换对应账号并突出整周草稿；转发给其他用户时后端返回 404。自动测试已通过，真实浏览器验收见 [W6-D5 验收记录](docs/qa/2026-10-11-w6-notifications.md)。
+
 [W3 内容联调记录](docs/qa/2026-09-25-w3-generation.md)包含 3 道 Java 题和 1 条英语跟读的核对结果。脚本时长目前只由提示词引导，正式发布前仍需人工检查。
 
 接入实现参考：[Spring Security 会话管理](https://docs.spring.io/spring-security/reference/6.5/servlet/authentication/session-management.html)、[CSRF](https://docs.spring.io/spring-security/reference/6.5/servlet/exploits/csrf.html)、[Redisson 配置](https://redisson.pro/docs/configuration/)、[Testcontainers MySQL](https://java.testcontainers.org/modules/databases/mysql/)、[LangChain4j MCP](https://docs.langchain4j.dev/tutorials/mcp/)。
