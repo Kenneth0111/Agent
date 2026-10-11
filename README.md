@@ -157,7 +157,9 @@ V4/V4.1/V4.2/V4.3 迁移保存选题、脚本、生成运行、失败节点、�
 
 工作台“作品观测”已支持按账号、作品、来源查看累计播放/点赞/评论，以及相邻观测变化和采集时间。单个快照不显示虚构增长，缺失值不补零，播放为零时比例不可计算；累计值下降提示核对。读取接口是 `GET /api/metrics/works?accountId=...` 和 `/api/metrics/works/{workId}/trend?source=...`，只返回本人数据。计数使用字符串保留精度，趋势最多显示最近 1000 条并标记窗口限制。CSV 上传页面仍待 W7-D6；当前不表示已接通抖音持续监控。[W7-D3 验收记录](docs/qa/2026-10-11-w7-trends.md)区分计算测试、真实接口和浏览器演示数据。
 
-评论后端导入使用 `POST /api/metrics/import/comments/preview` 和 `/comments/confirm`。正文常见邮箱、手机号会脱敏；相同样本跳过重复，正文/发布时间冲突时整份拒绝。`GET /api/metrics/review-evidence?accountId=...&q=...` 检索最多 20 条评论并保留引用编号、作品、时间和来源，同时返回适用于该账号的已有资料（可包含同行参考）。尚无评论与主题未匹配分别说明缺少依据；不推测同行完整指标。该接口提供确定性的证据检索，模型复盘在 W7-D5 接入。详见 [评论约定](docs/data-import-contract.md) 和 [W7-D4 验收记录](docs/qa/2026-10-11-w7-comments.md)。
+评论后端导入使用 `POST /api/metrics/import/comments/preview` 和 `/comments/confirm`。正文常见邮箱、手机号会脱敏；相同样本跳过重复，正文/发布时间冲突时整份拒绝。`GET /api/metrics/review-evidence?accountId=...&q=...` 检索最多 20 条评论并保留引用编号、作品、时间和来源，同时返回适用于该账号的已有资料（可包含同行参考）。尚无评论与主题未匹配分别说明缺少依据；不推测同行完整指标。该接口提供确定性的证据检索，运营复盘复用这项能力。详见 [评论约定](docs/data-import-contract.md) 和 [W7-D4 验收记录](docs/qa/2026-10-11-w7-comments.md)。
+
+运营复盘后端已接入四节点 LangGraph4j 流程：窗口事实采集、模型建议、引用校验、报告保存。`POST /api/metrics/reviews` 接收 accountId、topic、from/to 和 requestId；`GET` 同路径按账号列出最近报告或按报告 ID 查询。报告区分后端观测事实、模型可能解释和下一步实验，并按作品 ID 精确关联已有发布计划。没有指标/主题评论时跳过模型；相同请求复用报告，结果不明不自动重发。窗口、状态、预算及来源口径见 [复盘接口约定](docs/operation-review-contract.md)。数据页和定时路径在 W7-D6 继续，当前尚无真实运营效果验收。
 
 [W3 内容联调记录](docs/qa/2026-09-25-w3-generation.md)包含 3 道 Java 题和 1 条英语跟读的核对结果。脚本时长目前只由提示词引导，正式发布前仍需人工检查。
 

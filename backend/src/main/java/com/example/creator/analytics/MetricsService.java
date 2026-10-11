@@ -43,13 +43,25 @@ public class MetricsService {
 
     @Transactional(readOnly = true)
     public Trend trend(long ownerId, String workId, String source) {
+        return read(ownerId, workId, source, null, null);
+    }
+
+    @Transactional(readOnly = true)
+    public Trend trend(long ownerId, String workId, String source, Instant from, Instant to) {
+        return read(ownerId, workId, source, from, to);
+    }
+
+    private Trend read(long ownerId, String workId, String source, Instant from, Instant to) {
         requireOwned("SELECT id FROM video_works WHERE owner_id = ? AND id = ?", ownerId, workId);
         var snapshots = new ArrayList<>(jdbc.query("""
                 SELECT captured_at, views, likes, comment_count FROM video_metric_snapshots
-                WHERE owner_id = ? AND work_id = ? AND source = ? ORDER BY captured_at DESC LIMIT 1001
+                WHERE owner_id = ? AND work_id = ? AND source = ?
+                    AND (? IS NULL OR captured_at >= ?) AND (? IS NULL OR captured_at < ?)
+                ORDER BY captured_at DESC LIMIT 1001
                 """, (result, ignored) -> new Snapshot(result.getObject("captured_at", LocalDateTime.class)
                         .toInstant(ZoneOffset.UTC), (Long) result.getObject("views"),
-                        (Long) result.getObject("likes"), (Long) result.getObject("comment_count")), ownerId, workId, source));
+                        (Long) result.getObject("likes"), (Long) result.getObject("comment_count")), ownerId, workId, source,
+                utc(from), utc(from), utc(to), utc(to)));
         boolean truncated = snapshots.size() > 1000;
         if (truncated) snapshots.removeLast();
         var points = new ArrayList<Point>();
@@ -77,6 +89,7 @@ public class MetricsService {
         return current == null || previous == null ? null : current - previous;
     }
     private static String value(Long value) { return value == null ? null : value.toString(); }
+    private static LocalDateTime utc(Instant time) { return time == null ? null : LocalDateTime.ofInstant(time, ZoneOffset.UTC); }
     private static boolean negative(Long value) { return value != null && value < 0; }
     private static String percent(Long numerator, Long views) {
         return numerator == null || views == null || views == 0 ? null : BigDecimal.valueOf(numerator)
@@ -87,5 +100,5 @@ public class MetricsService {
     public record Trend(String workId, String source, boolean truncated, List<Point> points) { }
     public record Point(Instant capturedAt, Instant previousCapturedAt, String views, String likes,
                         String commentCount, String viewsDelta, String likesDelta, String commentCountDelta,
-                        String likeViewPercent, String commentViewPercent, boolean correction) { }
+                        String likeViewPercent, String commentViewPercent, boolean correction) implements java.io.Serializable { }
 }
