@@ -527,7 +527,7 @@ F03 中已执行的迁移为 `V1__users.sql`（W1-D2）、`V2__invitations.sql`�
 
   **完成标准：** 模板含 accountId、videoId、capturedAt、views、likes、commentCount、source；空值表示未知，零表示观测为零。
 
-- [ ] **W7-D2｜周二｜1.5 小时｜指标导入与幂等校验**
+- [x] **W7-D2｜周二｜1.5 小时｜指标导入与幂等校验**
 
   **动作：** 实现 CSV 预览和确认导入；检查账号归属、时间、数值与重复键；返回逐行错误，校验未通过时不静默丢弃行。
 

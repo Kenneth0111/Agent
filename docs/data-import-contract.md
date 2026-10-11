@@ -1,6 +1,6 @@
 # 作品指标与评论 CSV 约定
 
-W7-D1 数据约定，2026-10-11。数据库结构与模板已建立；上传预览、确认导入和趋势 API 尚待 W7-D2/D3 实现。第一版从用户实际取得的导出或手工记录导入，持续抖音接口同步另行接入。
+W7-D1/D2 数据约定，2026-10-11。数据库结构、模板及指标上传预览/确认接口已建立；趋势 API 待 W7-D3，导入页面待 W7-D6。第一版从用户实际取得的导出或手工记录导入，持续抖音接口同步另行接入。
 
 模板：[`video-metrics.csv`](templates/video-metrics.csv)、[`video-comments.csv`](templates/video-comments.csv)。使用 UTF-8 CSV（允许 BOM），第一行是固定字段名，字段顺序与模板相同；包含逗号、换行或双引号的文本遵守 CSV 引号规则。模板只有表头，避免示例数据误入真实统计。
 
@@ -45,3 +45,20 @@ W7-D1 数据约定，2026-10-11。数据库结构与模板已建立；上传预�
 [`video-metrics-valid.csv`](samples/video-metrics-valid.csv) 是演示的两次观测及“播放未知、点赞为零”；[`video-comments-demo.csv`](samples/video-comments-demo.csv) 是一条演示评论。示例的内部账号 UUID 不指向真实账号，导入前须替换为当前用户自己的账号；`DEMO_MANUAL` 标明模拟数据，不能作为真实运营验收证据。
 
 [`video-metrics-errors.csv`](samples/video-metrics-errors.csv) 从第 3 行起依次包含相同快照重复、冲突、所有指标未知、负数及错误时间。预览须逐行解释，并在确认前拒绝有错误的文件；相同重复可以报告为跳过，不能偷偷丢弃其他行。
+
+## 指标上传接口
+
+两个接口均使用已登录会话、CSRF header 和 `multipart/form-data` 的 `file` 字段；每个文件最多 1 MiB、1000 条数据记录。字段两端空白在校验前移除，指标空白仍保留为未知。超过限制拒绝整份文件，不截断行。CSV 解析使用固定版本 Apache Commons CSV 1.14.1 的 RFC4180 格式，参考 [Apache 官方 API](https://commons.apache.org/proper/commons-csv/apidocs/org/apache/commons/csv/CSVParser.html)。
+
+| 接口 | 成功结果 | 写入行为 |
+| --- | --- | --- |
+| POST `/api/metrics/import/preview` | 200，`canImport` 与 `rows` | 不写入；错误文件返回 `canImport=false` |
+| POST `/api/metrics/import/confirm` | 200，`imported`、`duplicates` 与 `rows` | 重新上传同一文件，再查归属与重复键；全部校验通过才按事务写入 |
+
+`rows` 中每项含 `rowNumber`、`status`、`errorCode`、`data`。`rowNumber` 是逻辑 CSV 记录编号（表头为 1，多行引号字段视为一条记录），普通单行 CSV 与文本行号一致；无法可靠拆行的格式/编码错误返回第 1 行文件级错误。状态分别为 `READY`、`DUPLICATE`、`ERROR`；确认成功时新记录为 `IMPORTED`。`data` 保留合法字段和规范化 UTC 时间，错误记录为 `null`。
+
+确认遇到任何错误或冲突返回 422，响应仍含逐行预览，整份文件不写入；超大小返回 413，匿名返回 401，缺失或错误 CSRF 返回 403。若数据库发生并发约束冲突，返回 409 和 `IMPORT_CONFLICT_RETRY_PREVIEW`，由用户重新预览。正常并发导入同账号会按账号顺序加锁串行重校验，重复请求报告跳过，不增加同一快照。
+
+常见逐行错误：`CSV_COLUMNS_INVALID`、`ACCOUNT_ID_INVALID`、`ACCOUNT_NOT_FOUND`、`VIDEO_ID_INVALID`、`CAPTURED_AT_INVALID`、`VIEWS_INVALID`、`LIKES_INVALID`、`COMMENT_COUNT_INVALID`、`METRICS_MISSING`、`SOURCE_INVALID`、`SNAPSHOT_CONFLICT`。文件级错误包括 `CSV_EMPTY`、`CSV_NO_ROWS`、`CSV_HEADER_INVALID`、`CSV_UTF8_INVALID`、`CSV_INVALID`、`CSV_TOO_LARGE`、`CSV_TOO_MANY_ROWS`。空行也作为错误记录处理，不静默跳过。
+
+本接口目前只导入指标；评论模板与结构已准备，评论导入仍属于 W7-D4。上述自动测试使用演示数据，不表示已完成真实运营数据验收。
