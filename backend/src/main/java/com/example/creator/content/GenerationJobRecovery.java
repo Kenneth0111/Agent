@@ -1,5 +1,6 @@
 package com.example.creator.content;
 
+import com.example.creator.notification.NotificationService;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
@@ -12,6 +13,8 @@ import org.springframework.context.event.EventListener;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /** Reconciles completed runs and surfaces interrupted, ambiguous paid calls for review. */
 @Component
@@ -22,15 +25,20 @@ public class GenerationJobRecovery {
     private final GenerationService generation;
     private final ObjectMapper json;
     private final boolean autoResumeEnabled;
+    private final NotificationService notifications;
+    private final TransactionTemplate transactions;
 
     GenerationJobRecovery(JdbcTemplate jdbc, RedissonClient redisson,
                           GenerationService generation, ObjectMapper json,
-                          @Value("${creator.jobs.scheduler-enabled:false}") boolean autoResumeEnabled) {
+                          @Value("${creator.jobs.scheduler-enabled:false}") boolean autoResumeEnabled,
+                          NotificationService notifications, PlatformTransactionManager transactionManager) {
         this.jdbc = jdbc;
         this.redisson = redisson;
         this.generation = generation;
         this.json = json;
         this.autoResumeEnabled = autoResumeEnabled;
+        this.notifications = notifications;
+        this.transactions = new TransactionTemplate(transactionManager);
     }
 
     @EventListener(ApplicationReadyEvent.class)
@@ -66,11 +74,20 @@ public class GenerationJobRecovery {
                 if (resumed != null || "SUCCEEDED".equals(item.runStatus()) || "FAILED".equals(item.runStatus())) {
                     var status = resumed == null ? item.runStatus() : resumed.status();
                     var errorCode = resumed == null ? item.errorCode() : resumed.errorCode();
-                    jdbc.update("""
-                            UPDATE generation_job_triggers
-                            SET status = ?, generation_run_id = ?, error_code = ?
-                            WHERE id = ? AND owner_id = ? AND status = 'RUNNING'
-                            """, status, item.runId(), errorCode, item.id(), item.ownerId());
+                    try {
+                        transactions.executeWithoutResult(ignored -> {
+                            int changed = jdbc.update("""
+                                    UPDATE generation_job_triggers
+                                    SET status = ?, generation_run_id = ?, error_code = ?
+                                    WHERE id = ? AND owner_id = ? AND status = 'RUNNING'
+                                    """, status, item.runId(), errorCode, item.id(), item.ownerId());
+                            if (changed == 1 && "SUCCEEDED".equals(status))
+                                notifications.enqueue(item.ownerId(), item.id(), item.runId());
+                        });
+                    } catch (RuntimeException failure) {
+                        log.warn("Generation trigger {} completion deferred: {}", item.id(),
+                                failure.getClass().getSimpleName());
+                    }
                 } else {
                     jdbc.update("""
                             UPDATE generation_job_triggers SET status = 'NEEDS_REVIEW',

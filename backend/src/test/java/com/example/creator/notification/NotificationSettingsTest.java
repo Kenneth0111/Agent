@@ -139,10 +139,12 @@ class NotificationSettingsTest extends IntegrationTestSupport {
         assertThat(notifications.claimFeishu(owner, trigger.id())).isEmpty();
         for (int attempt = 2; attempt <= 3; attempt++) {
             notifications.finishFeishu(owner, first.id(), "RETRY", "FEISHU_RATE_LIMITED");
-            assertThat(notifications.dueRetries()).noneMatch(due -> due.triggerId().equals(trigger.id()));
+            assertThat(notifications.dueDeliveries()).noneMatch(due -> due.triggerId().equals(trigger.id())
+                    && due.channel().equals("FEISHU"));
             jdbc.update("UPDATE notification_deliveries SET next_attempt_at = DATE_SUB(CURRENT_TIMESTAMP(6),"
                     + " INTERVAL 1 SECOND) WHERE id = ?", first.id());
-            assertThat(notifications.dueRetries()).anyMatch(due -> due.triggerId().equals(trigger.id()));
+            assertThat(notifications.dueDeliveries()).anyMatch(due -> due.triggerId().equals(trigger.id())
+                    && due.channel().equals("FEISHU"));
             assertThat(notifications.claimFeishu(owner, trigger.id())).isPresent();
         }
         notifications.finishFeishu(owner, first.id(), "RETRY", "FEISHU_RATE_LIMITED");
@@ -155,6 +157,48 @@ class NotificationSettingsTest extends IntegrationTestSupport {
         notifications.markAbandonedUnknown();
         assertThat(jdbc.queryForObject("SELECT status FROM notification_deliveries WHERE id = ?",
                 String.class, emailDelivery.id())).isEqualTo("UNKNOWN");
+    }
+
+    @Test
+    void notificationsQueuedBeforeAnInterruptionRemainDispatchable() {
+        var email = "pending-notification-" + UUID.randomUUID() + "@example.test";
+        jdbc.update("INSERT INTO users (email, password_hash, display_name) VALUES (?, ?, ?)",
+                email, passwords.encode("development-fixture-only"), "pending notification");
+        var owner = jdbc.queryForObject("SELECT id FROM users WHERE email = ?", Long.class, email);
+        notifications.save(owner, new NotificationService.SettingsInput("owner@example.test", "sender@example.test", true,
+                "smtp.example.test", 587, "smtp-user", "smtp-secret", true,
+                "https://open.feishu.cn/open-apis/bot/v2/hook/test-token", "sign-secret"));
+        var account = accounts.create(owner, new AccountService.AccountInput("待发送恢复", "程序员",
+                "Java 和英语", List.of("Java 面试", "英语跟读"), 3));
+        var slots = List.of(new GenerationService.WeekSlot("Java 面试", List.of("m-1"), ""),
+                new GenerationService.WeekSlot("Java 面试", List.of("m-2"), ""),
+                new GenerationService.WeekSlot("英语跟读", List.of("m-3"), ""));
+        var job = jobs.save(owner, account.id(), new GenerationJobsService.JobInput(1,
+                LocalTime.of(9, 0), "Asia/Shanghai", false, "恢复演练", slots));
+        var run = content.startRun(owner, account.id(), "WEEK_PLAN");
+        when(generation.generate(eq(owner), any())).thenReturn(content.finishRun(owner, run.id(), "week-fixture", 6));
+        var trigger = jobs.trigger(owner, job.id(), GenerationJobsService.TriggerSource.MANUAL);
+
+        // Senders are mocks, leaving the committed queue as if the process stopped before first delivery.
+        assertThat(notifications.dueDeliveries().stream().filter(due -> due.triggerId().equals(trigger.id()))
+                .map(NotificationService.DueDelivery::channel)).containsExactlyInAnyOrder("EMAIL", "FEISHU");
+        notifications.save(owner, new NotificationService.SettingsInput(null, null, false,
+                null, null, null, null, false, null, null));
+        assertThat(notifications.dueDeliveries()).noneMatch(due -> due.triggerId().equals(trigger.id()));
+        notifications.save(owner, new NotificationService.SettingsInput(null, null, true,
+                null, null, null, null, true, null, null));
+        var recoveredEmails = org.mockito.Mockito.mock(EmailSender.class);
+        var recoveredFeishu = org.mockito.Mockito.mock(FeishuSender.class);
+        new NotificationRetryScanner(notifications, recoveredEmails, recoveredFeishu).scan();
+        verify(recoveredEmails).deliverPending(owner, trigger.id());
+        verify(recoveredFeishu).deliverPending(owner, trigger.id());
+        var emailDelivery = notifications.claimEmail(owner, trigger.id()).orElseThrow();
+        notifications.finishEmail(owner, emailDelivery.id(), "SENT", null);
+        var feishuDelivery = notifications.claimFeishu(owner, trigger.id()).orElseThrow();
+        notifications.finishFeishu(owner, feishuDelivery.id(), "UNKNOWN", "FEISHU_SEND_UNKNOWN");
+        assertThat(notifications.dueDeliveries()).noneMatch(due -> due.triggerId().equals(trigger.id()));
+        assertThat(notifications.claimEmail(owner, trigger.id())).isEmpty();
+        assertThat(notifications.claimFeishu(owner, trigger.id())).isEmpty();
     }
 
     private HttpClient client() {

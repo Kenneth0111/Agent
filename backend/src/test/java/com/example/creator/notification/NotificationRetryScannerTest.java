@@ -14,7 +14,7 @@ class NotificationRetryScannerTest {
         var notifications = mock(NotificationService.class);
         var emails = mock(EmailSender.class);
         var feishu = mock(FeishuSender.class);
-        when(notifications.dueRetries()).thenReturn(List.of(
+        when(notifications.dueDeliveries()).thenReturn(List.of(
                 new NotificationService.DueDelivery(7, "email-trigger", "EMAIL"),
                 new NotificationService.DueDelivery(8, "feishu-trigger", "FEISHU")));
         doThrow(new IllegalStateException("mail unavailable"))

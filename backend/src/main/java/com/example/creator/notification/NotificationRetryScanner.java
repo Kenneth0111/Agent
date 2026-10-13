@@ -21,7 +21,7 @@ public class NotificationRetryScanner {
     @Scheduled(fixedDelay = 60_000)
     public void scan() {
         notifications.markAbandonedUnknown();
-        for (var due : notifications.dueRetries()) {
+        for (var due : notifications.dueDeliveries()) {
             try {
                 if ("EMAIL".equals(due.channel())) emails.deliverPending(due.ownerId(), due.triggerId());
                 if ("FEISHU".equals(due.channel())) feishu.deliverPending(due.ownerId(), due.triggerId());

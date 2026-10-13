@@ -22,6 +22,8 @@ import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /** Persists weekly generation configuration and source-labelled trigger runs. */
 @Service
@@ -35,10 +37,11 @@ public class GenerationJobsService {
     private final NotificationService notifications;
     private final EmailSender emails;
     private final FeishuSender feishu;
+    private final TransactionTemplate transactions;
 
     GenerationJobsService(JdbcTemplate jdbc, AccountProfiles accounts, GenerationService generation,
                           ObjectMapper json, RedissonClient redisson, NotificationService notifications,
-                          EmailSender emails, FeishuSender feishu) {
+                          EmailSender emails, FeishuSender feishu, PlatformTransactionManager transactionManager) {
         this.jdbc = jdbc;
         this.accounts = accounts;
         this.generation = generation;
@@ -47,6 +50,7 @@ public class GenerationJobsService {
         this.notifications = notifications;
         this.emails = emails;
         this.feishu = feishu;
+        this.transactions = new TransactionTemplate(transactionManager);
     }
 
     @Transactional
@@ -142,12 +146,9 @@ public class GenerationJobsService {
             if (runKey == null) throw duplicate;
             return findScheduledTrigger(ownerId, job.id(), runKey);
         }
+        ContentService.GenerationRun run;
         try {
-            var run = generation.generate(ownerId, request);
-            jdbc.update("""
-                    UPDATE generation_job_triggers
-                    SET status = ?, generation_run_id = ?, error_code = ? WHERE id = ? AND owner_id = ?
-                    """, run.status(), run.id(), run.errorCode(), id, ownerId);
+            run = generation.generate(ownerId, request);
         } catch (RuntimeException failed) {
             jdbc.update("""
                     UPDATE generation_job_triggers SET status = 'FAILED', error_code = ?
@@ -156,14 +157,23 @@ public class GenerationJobsService {
                     "TRIGGER_FAILED", id, ownerId);
             throw failed;
         }
+        try {
+            transactions.executeWithoutResult(ignored -> {
+                int changed = jdbc.update("""
+                        UPDATE generation_job_triggers
+                        SET status = ?, generation_run_id = ?, error_code = ?
+                        WHERE id = ? AND owner_id = ? AND status = 'RUNNING'
+                        """, run.status(), run.id(), run.errorCode(), id, ownerId);
+                if (changed == 1 && "SUCCEEDED".equals(run.status())) notifications.enqueue(ownerId, id, run.id());
+            });
+        } catch (RuntimeException failure) {
+            // The completed generation remains saved; recovery can finish this trigger without another model call.
+            log.warn("generation trigger completion deferred: triggerId={} type={}", id,
+                    failure.getClass().getSimpleName());
+            return findTrigger(ownerId, id);
+        }
         var trigger = findTrigger(ownerId, id);
         if (trigger.isPresent() && "SUCCEEDED".equals(trigger.get().status())) {
-            try {
-                notifications.enqueue(ownerId, id, trigger.get().generationRunId());
-            } catch (RuntimeException failure) {
-                log.warn("notification enqueue failed: triggerId={} type={}", id,
-                        failure.getClass().getSimpleName());
-            }
             try {
                 emails.deliverPending(ownerId, id);
             } catch (RuntimeException failure) {

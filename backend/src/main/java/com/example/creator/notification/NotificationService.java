@@ -125,11 +125,16 @@ public class NotificationService {
                 """, status, code, deliveryId, ownerId);
     }
 
-    List<DueDelivery> dueRetries() {
+    List<DueDelivery> dueDeliveries() {
         return jdbc.query("""
-                SELECT owner_id, trigger_id, channel FROM notification_deliveries
-                WHERE status = 'RETRY' AND next_attempt_at <= CURRENT_TIMESTAMP(6)
-                ORDER BY next_attempt_at LIMIT 100
+                SELECT d.owner_id, d.trigger_id, d.channel FROM notification_deliveries d
+                JOIN notification_settings s ON s.owner_id = d.owner_id
+                WHERE d.attempt_count < 3
+                    AND (d.status = 'PENDING' OR
+                        (d.status = 'RETRY' AND d.next_attempt_at <= CURRENT_TIMESTAMP(6)))
+                    AND ((d.channel = 'EMAIL' AND s.email_enabled = TRUE)
+                        OR (d.channel = 'FEISHU' AND s.feishu_enabled = TRUE))
+                ORDER BY COALESCE(d.next_attempt_at, d.created_at), d.id LIMIT 100
                 """, (row, ignored) -> new DueDelivery(row.getLong("owner_id"),
                 row.getString("trigger_id"), row.getString("channel")));
     }
