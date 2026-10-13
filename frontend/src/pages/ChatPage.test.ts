@@ -102,6 +102,36 @@ describe('creator chat', () => {
     wrapper.unmount()
   })
 
+  it.each(['MCP_UNAVAILABLE', 'MCP_INVALID_RESULT', 'MCP_SEARCH_TOOL_UNAVAILABLE', 'NETWORK_ERROR'])
+    ('clears an earlier answer and its sources after %s', async failure => {
+      const fetch = vi.fn()
+        .mockResolvedValueOnce(Response.json([{ id: 'java', name: 'Java 账号', positioning: '面试', columns: [], weeklyTarget: 2 }]))
+        .mockResolvedValueOnce(Response.json({ headerName: 'X-CSRF-TOKEN', token: 'csrf' }))
+        .mockResolvedValueOnce(Response.json({ status: 'MATCHED', answer: '上一次答案 [1]', sources: [
+          { materialId: 'm1', title: '上一次来源', snippet: '资料', sourceUrl: 'https://example.test/source', kind: 'TEXT' },
+        ] }))
+        .mockResolvedValueOnce(Response.json({ headerName: 'X-CSRF-TOKEN', token: 'csrf' }))
+      if (failure === 'NETWORK_ERROR') fetch.mockRejectedValueOnce(new TypeError('Failed to fetch'))
+      else fetch.mockResolvedValueOnce(Response.json({ status: 'INSUFFICIENT_MATERIAL', answer: null,
+        sources: [], webSearchStatus: failure }))
+      vi.stubGlobal('fetch', fetch)
+      const wrapper = mount(ChatPage)
+      await flushPromises()
+      await wrapper.get('#agent-query').setValue('第一个问题')
+      await wrapper.findAll('button')[1].trigger('click')
+      await flushPromises()
+      expect(wrapper.get('.research-answer').text()).toContain('上一次答案')
+      await wrapper.get('#agent-query').setValue('另一个没有证据的问题')
+      await wrapper.findAll('button')[1].trigger('click')
+      await flushPromises()
+      expect(wrapper.text()).not.toContain('上一次答案')
+      expect(wrapper.find('.source-list').exists()).toBe(false)
+      expect(failure === 'NETWORK_ERROR' ? wrapper.get('[role="alert"]').text()
+        : wrapper.get('.research-answer').text()).toContain(failure === 'NETWORK_ERROR'
+          ? '暂时无法完成请求' : '联网搜索暂时不可用')
+      wrapper.unmount()
+    })
+
   it('shows insufficient material without a fabricated answer', async () => {
     vi.stubGlobal('fetch', vi.fn()
       .mockResolvedValueOnce(Response.json([{ id: 'java', name: 'Java 账号', positioning: '面试', columns: [], weeklyTarget: 2 }]))
