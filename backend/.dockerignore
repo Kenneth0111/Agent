@@ -1,0 +1,4 @@
+**
+!Dockerfile
+!target/
+!target/creator-agent-0.1.0-SNAPSHOT.jar

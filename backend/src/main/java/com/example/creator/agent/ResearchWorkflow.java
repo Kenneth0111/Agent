@@ -5,6 +5,7 @@ import com.example.creator.material.MaterialSearchService.SearchResponse;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.Map;
+import java.util.UUID;
 import org.bsc.langgraph4j.CompileConfig;
 import org.bsc.langgraph4j.CompiledGraph;
 import org.bsc.langgraph4j.GraphStateException;
@@ -50,7 +51,8 @@ public class ResearchWorkflow {
     public ResearchResponse research(long userId, String accountId, String query) {
         ResearchState state;
         try {
-            state = graph.invoke(Map.of("userId", userId, "accountId", accountId, "query", query))
+            state = graph.invoke(Map.of("userId", userId, "accountId", accountId, "query", query,
+                            "taskId", UUID.randomUUID().toString()))
                     .orElseThrow(() -> new ModelGateway.ModelFailure("AGENT_NO_RESULT"));
         } catch (RuntimeException failure) {
             for (Throwable cause = failure; cause != null; cause = cause.getCause()) {
@@ -67,7 +69,7 @@ public class ResearchWorkflow {
 
     private Map<String, Object> searchWeb(ResearchState state) {
         try {
-            return Map.of("webEvidence", mcpSearch.search(state.query()));
+            return Map.of("webEvidence", mcpSearch.search(state.userId(), state.taskId(), state.query()));
         } catch (McpSearchGateway.McpFailure failure) {
             return Map.of("webEvidence", new SearchResponse("INSUFFICIENT_MATERIAL", java.util.List.of()),
                     "webSearchStatus", failure.getMessage());
@@ -98,7 +100,7 @@ public class ResearchWorkflow {
                     .append("\n正文：").append(result.snippet(), 0, Math.min(600, result.snippet().length()))
                     .append("\n");
         }
-        return Map.of("answer", model.reply(prompt.toString()));
+        return Map.of("answer", model.reply(state.userId(), state.taskId(), prompt.toString()));
     }
 
     public record ResearchResponse(String status, String answer,

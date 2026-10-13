@@ -343,6 +343,34 @@ public class ContentService {
         return findRun(ownerId, runId).orElseThrow();
     }
 
+    public List<WeekStage> weekStages(long ownerId, String runId) {
+        return jdbc.query("""
+                SELECT stage_index, stage_name, status, output_id, attempts
+                FROM generation_week_stages WHERE owner_id = ? AND run_id = ? ORDER BY stage_index
+                """, (row, ignored) -> new WeekStage(row.getInt("stage_index"), row.getString("stage_name"),
+                row.getString("status"), row.getString("output_id"), row.getInt("attempts")), ownerId, runId);
+    }
+
+    public void startWeekStage(long ownerId, String runId, int index, String name, Object input) {
+        try {
+            jdbc.update("""
+                    INSERT INTO generation_week_stages
+                        (run_id, owner_id, stage_index, stage_name, status, input_json)
+                    VALUES (?, ?, ?, ?, 'STARTED', ?)
+                    """, runId, ownerId, index, name, json.writeValueAsString(input));
+        } catch (JsonProcessingException impossible) {
+            throw new IllegalStateException(impossible);
+        }
+    }
+
+    public void completeWeekStage(long ownerId, String runId, int index, String outputId, int attempts) {
+        int changed = jdbc.update("""
+                UPDATE generation_week_stages SET status = 'COMPLETED', output_id = ?, attempts = ?
+                WHERE run_id = ? AND owner_id = ? AND stage_index = ? AND status = 'STARTED'
+                """, outputId, attempts, runId, ownerId, index);
+        if (changed != 1) throw new IllegalStateException("Week stage checkpoint was not started");
+    }
+
     @Transactional
     public String saveTopic(long ownerId, String accountId, Topic topic, Set<String> allowedSources) {
         if (accountId == null || accounts.find(ownerId, accountId).isEmpty())
@@ -416,6 +444,7 @@ public class ContentService {
     public record WeekItem(String column, String topicId, String scriptId) { }
     public record WeekPlan(String id, String accountId, List<WeekItem> items, String status) { }
     public record RunReservation(GenerationRun run, boolean created) { }
+    public record WeekStage(int index, String name, String status, String outputId, int attempts) { }
     private record RequestRow(String id, String accountId, String hash) { }
     public static final class VersionConflict extends RuntimeException { }
 }

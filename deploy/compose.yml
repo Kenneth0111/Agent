@@ -1,0 +1,125 @@
+# Candidate standalone data services. Confirm BaoTa inventory before applying on the server.
+name: creator-agent-release
+
+services:
+  mysql:
+    image: mysql:8.4@sha256:0744ee5ef89ce6ccfa13de3e579fe6b9e27f93dd70da9c06d2c908b1b193fb8d
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Set a new release password}
+      MYSQL_DATABASE: creator_agent
+      MYSQL_USER: creator
+      MYSQL_PASSWORD: ${DB_PASSWORD:?Set a new release password}
+    volumes:
+      - mysql-data:/var/lib/mysql
+    networks: [data]
+    mem_limit: 768m
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "MYSQL_PWD=\"$$MYSQL_PASSWORD\" mysql -u creator -D creator_agent -e 'SELECT 1' >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    logging: &bounded-logs
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  redis:
+    image: redis:7.4-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set a new release password}
+    command: ["sh", "-c", "exec redis-server --appendonly yes --requirepass \"$$REDIS_PASSWORD\" --maxmemory 96mb --maxmemory-policy noeviction"]
+    volumes:
+      - redis-data:/data
+    networks: [data]
+    mem_limit: 256m
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$REDIS_PASSWORD\" redis-cli ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    logging: *bounded-logs
+
+  backend:
+    image: creator-agent-backend:${IMAGE_TAG:?Set a release image tag}
+    build:
+      context: ../backend
+    environment:
+      SERVER_ADDRESS: 0.0.0.0
+      SERVER_PORT: "8080"
+      SERVER_FORWARD_HEADERS_STRATEGY: framework
+      DB_URL: jdbc:mysql://mysql:3306/creator_agent?connectionTimeZone=UTC
+      DB_USER: creator
+      DB_PASSWORD: ${DB_PASSWORD:?Set a new release password}
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set a new release password}
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-true}
+      CREATOR_PUBLIC_BASE_URL: ${CREATOR_PUBLIC_BASE_URL:?Set the public site URL}
+      NOTIFICATION_ENCRYPTION_KEY: ${NOTIFICATION_ENCRYPTION_KEY:?Generate an independent encryption key}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-flash}
+      MCP_SEARCH_URL: ${MCP_SEARCH_URL:-}
+      MCP_SEARCH_BEARER_TOKEN: ${MCP_SEARCH_BEARER_TOKEN:-}
+      MCP_SEARCH_ALLOWED_TOOLS: tavily_search
+      GENERATION_JOBS_SCHEDULER_ENABLED: "false"
+      REVIEW_JOBS_SCHEDULER_ENABLED: "false"
+      USAGE_BUDGET_ENABLED: "true"
+      USER_MONTHLY_CALL_LIMIT: ${USER_MONTHLY_CALL_LIMIT:-100}
+      SYSTEM_MONTHLY_BUDGET_CNY: ${SYSTEM_MONTHLY_BUDGET_CNY:-100}
+      MODEL_INPUT_CNY_PER_MILLION: ${MODEL_INPUT_CNY_PER_MILLION:-}
+      MODEL_OUTPUT_CNY_PER_MILLION: ${MODEL_OUTPUT_CNY_PER_MILLION:-}
+      MCP_SEARCH_CNY_PER_CALL: ${MCP_SEARCH_CNY_PER_CALL:-}
+    depends_on:
+      mysql: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    networks: [data, app]
+    mem_limit: 1024m
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent http://127.0.0.1:8080/api/health >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 60s
+    logging: *bounded-logs
+
+  web:
+    image: creator-agent-web:${IMAGE_TAG:?Set a release image tag}
+    build:
+      context: ../frontend
+    ports:
+      - "127.0.0.1:${WEB_PORT:?Confirm an unused local port}:8080"
+    depends_on:
+      backend: {condition: service_healthy}
+    networks: [app]
+    mem_limit: 64m
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/ && wget -q -O /dev/null http://127.0.0.1:8080/api/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+    logging: *bounded-logs
+
+networks:
+  data:
+    internal: true
+  app: {}
+
+volumes:
+  mysql-data:
+  redis-data:

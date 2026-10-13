@@ -1,7 +1,7 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import GenerationPage from './GenerationPage.vue'
-import { postJsonWithCsrf, request } from '../api/http'
+import { HttpError, postJsonWithCsrf, request } from '../api/http'
 
 vi.mock('../api/http', async importOriginal => ({ ...await importOriginal<typeof import('../api/http')>(),
   request: vi.fn(), postJsonWithCsrf: vi.fn() }))
@@ -25,6 +25,38 @@ beforeEach(() => {
 })
 
 describe('content generation page', () => {
+  it('opens the account and highlights the week named by an owned notification run', async () => {
+    vi.mocked(request).mockImplementation(async path => {
+      if (path === '/api/accounts') return [account, { id: 'account-2', name: '通知账号' }]
+      if (path === '/api/materials') return [material]
+      if (path === '/api/generations/run-1') return { id: 'run-1', accountId: 'account-2',
+        mode: 'WEEK_PLAN', status: 'SUCCEEDED', resultId: 'week-2', errorCode: null }
+      if (path === '/api/generations/week-plans?accountId=account-2') return [
+        { id: 'week-2', accountId: 'account-2', status: 'DRAFT', items: [] },
+      ]
+      return []
+    })
+    const wrapper = mount(GenerationPage, { props: { linkedRunId: 'run-1' } })
+    await flushPromises()
+    expect((wrapper.get('#generation-account').element as HTMLSelectElement).value).toBe('account-2')
+    expect(wrapper.get('.linked-week').attributes('id')).toBe('week-week-2')
+    expect(wrapper.text()).toContain('已定位到通知对应的整周草稿')
+    wrapper.unmount()
+  })
+
+  it('does not highlight or claim access when a forwarded run is rejected', async () => {
+    const original = vi.mocked(request).getMockImplementation()!
+    vi.mocked(request).mockImplementation(async (...args) => {
+      if (args[0] === '/api/generations/other-run') throw new HttpError(404)
+      return original(...args)
+    })
+    const wrapper = mount(GenerationPage, { props: { linkedRunId: 'other-run' } })
+    await flushPromises()
+    expect(wrapper.find('.linked-week').exists()).toBe(false)
+    expect(wrapper.text()).toContain('不存在，或你无权查看')
+    wrapper.unmount()
+  })
+
   it('ignores late topic and week responses after switching accounts', async () => {
     let finishTopics!: (value: unknown) => void
     let finishWeeks!: (value: unknown) => void

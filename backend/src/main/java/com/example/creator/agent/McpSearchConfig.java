@@ -15,11 +15,12 @@ public class McpSearchConfig {
     McpSearchGateway mcpSearchGateway(@Value("${creator.mcp.search.url:}") String endpoint,
                                       @Value("${creator.mcp.search.bearer-token:}") String bearerToken,
                                       @Value("${creator.mcp.search.allowed-tools:tavily_search}") String allowedTools,
-                                      @Value("${creator.mcp.search.timeout:10s}") Duration timeout) {
+                                      @Value("${creator.mcp.search.timeout:10s}") Duration timeout,
+                                      UsageLedger usage) {
         var allowList = Arrays.stream(allowedTools.split(",")).map(String::strip)
                 .filter(name -> !name.isEmpty()).collect(Collectors.toUnmodifiableSet());
         var headers = bearerToken.isBlank() ? Map.<String, String>of()
                 : Map.of("Authorization", "Bearer " + bearerToken);
-        return new McpSearchGateway(endpoint, headers, allowList, timeout);
+        return new McpSearchGateway(endpoint, headers, allowList, timeout, usage);
     }
 }

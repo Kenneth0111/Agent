@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { HttpError, postJsonWithCsrf, request } from '../api/http'
 
 interface Account { id: string; name: string }
@@ -9,6 +9,8 @@ interface Script { id: string; topicId: string; script: { spokenText: string; sh
 interface ScriptVersion { version: number; script: { spokenText: string; shootingNotes: string; sourceIds: string[] }; instruction: string }
 interface WeekPlan { id: string; accountId: string; status: string; items: { column: string; topicId: string; scriptId: string }[] }
 interface Run { id: string; accountId: string; mode: string; status: 'RUNNING' | 'SUCCEEDED' | 'FAILED'; resultId: string | null; errorCode: string | null; failedNode?: string | null }
+
+const props = defineProps<{ linkedRunId?: string | null }>()
 
 const accounts = ref<Account[]>([])
 const materials = ref<Material[]>([])
@@ -25,6 +27,8 @@ const revisions = ref<Record<string, string>>({})
 const histories = ref<Record<string, ScriptVersion[]>>({})
 const error = ref('')
 const run = ref<Run | null>(null)
+const linkedWeekId = ref('')
+const linkMessage = ref('')
 const pending = ref(false)
 let weekRequest: { signature: string; id: string } | null = null
 let topicsRequest = 0
@@ -77,6 +81,31 @@ async function load() {
     accountId.value = accountResult[0]?.id ?? ''
   } catch { error.value = '暂时无法读取创作账号或资料。' }
   finally { pending.value = false }
+}
+
+async function openLinkedRun(id: string) {
+  try {
+    const result = await request(`/api/generations/${encodeURIComponent(id)}`)
+    if (!validRun(result) || result.mode !== 'WEEK_PLAN' || result.status !== 'SUCCEEDED'
+      || !result.resultId || !accounts.value.some(account => account.id === result.accountId)) {
+      linkMessage.value = '这条通知对应的整周草稿暂不可查看。'
+      return
+    }
+    accountId.value = result.accountId
+    await nextTick()
+    await loadWeeks()
+    if (!weekPlans.value.some(week => week.id === result.resultId)) {
+      linkMessage.value = '这条通知对应的整周草稿暂不可查看。'
+      return
+    }
+    linkedWeekId.value = result.resultId
+    linkMessage.value = '已定位到通知对应的整周草稿。'
+    await nextTick()
+    document.getElementById(`week-${result.resultId}`)?.scrollIntoView?.({ block: 'center' })
+  } catch (cause) {
+    linkMessage.value = cause instanceof HttpError && cause.status === 404
+      ? '这条通知对应的草稿不存在，或你无权查看。' : '暂时无法打开通知对应的草稿。'
+  }
 }
 
 async function loadTopics() {
@@ -217,7 +246,10 @@ async function showHistory(id: string) {
 watch(accountId, loadTopics)
 watch(accountId, loadWeeks)
 watch(topicId, loadScripts)
-onMounted(load)
+onMounted(async () => {
+  await load()
+  if (props.linkedRunId) await openLinkedRun(props.linkedRunId)
+})
 </script>
 
 <template>
@@ -269,10 +301,12 @@ onMounted(load)
           @click="generateWeek">{{ pending ? '生成中…' : '生成整周草稿' }}</button>
       </fieldset>
       <p v-if="run" role="status">{{ run.status === 'SUCCEEDED' ? '已保存草稿。' : run.status === 'RUNNING' ? '生成仍在进行中，稍后可再次点击查看结果。' : `${nodeLabel(run.failedNode)}失败（运行 ID：${run.id}）` }}</p>
+      <p v-if="linkMessage" role="status">{{ linkMessage }}</p>
       <p v-if="error" role="alert" class="error">{{ error }}</p>
     </div>
     <div class="results">
-      <div v-for="week in weekPlans" :key="week.id" class="result week-result">
+      <div v-for="week in weekPlans" :id="`week-${week.id}`" :key="week.id" class="result week-result"
+        :class="{ 'linked-week': week.id === linkedWeekId }">
         <small>整周草稿 · {{ week.status }}</small>
         <ol><li v-for="item in week.items" :key="item.topicId">
           <button type="button" class="week-topic" @click="topicId = item.topicId">
@@ -351,6 +385,7 @@ button:disabled { opacity: .6; cursor: wait; }
 .week-fields p { margin: 0; }
 .week-result ol { padding-left: 20px; }
 .week-topic { background: transparent; color: #234d3b; padding: 2px; text-decoration: underline; }
+.linked-week { padding: 14px; border: 2px solid #718540; border-radius: 4px; background: #f1f5e9; }
 @media (max-width: 980px) { .generation-card { grid-template-columns: 1fr 1fr; } .heading { grid-column: 1 / -1; } }
 @media (max-width: 700px) { .generation-card { grid-template-columns: 1fr; padding: 24px; } .heading { grid-column: auto; } }
 </style>

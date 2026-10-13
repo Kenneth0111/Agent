@@ -3,6 +3,7 @@ package com.example.creator.agent;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import org.bsc.langgraph4j.CompileConfig;
 import org.bsc.langgraph4j.CompiledGraph;
 import org.bsc.langgraph4j.GraphStateException;
@@ -41,7 +42,8 @@ public class ContentWorkflow {
 
     public ContentState summarizeAccount(long userId, String accountId) {
         try {
-            return graph.invoke(Map.of("userId", userId, "accountId", accountId))
+            return graph.invoke(Map.of("userId", userId, "accountId", accountId,
+                            "taskId", UUID.randomUUID().toString()))
                     .orElseThrow(() -> new ModelGateway.ModelFailure("AGENT_NO_RESULT"));
         } catch (RuntimeException failure) {
             // The graph wraps node failures; callers need the original code to react to it.
@@ -58,12 +60,14 @@ public class ContentWorkflow {
 
     private Map<String, Object> readAccount(ContentState state) {
         var tool = new AccountProfileTool(accounts, json, state.userId());
-        return Map.of("accountFacts", model.replyUsingTools("readAccount", READ_INSTRUCTION,
+        return Map.of("accountFacts", model.replyUsingTools(state.userId(), state.taskId(),
+                "readAccount", READ_INSTRUCTION,
                 "请读取账号 ID：" + state.accountId(), List.<LocalTool>of(tool), MAX_TOOL_ROUNDS));
     }
 
     private Map<String, Object> summarize(ContentState state) {
         var facts = state.accountFacts().orElseThrow(() -> new ModelGateway.ModelFailure("AGENT_NO_RESULT"));
-        return Map.of("summary", model.reply(SUMMARY_INSTRUCTION + facts));
+        return Map.of("summary", model.reply(state.userId(), state.taskId(),
+                SUMMARY_INSTRUCTION + facts));
     }
 }

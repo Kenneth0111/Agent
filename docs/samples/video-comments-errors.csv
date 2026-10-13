@@ -1,0 +1,6 @@
+accountId,videoId,commentId,text,publishedAt,capturedAt,source
+00000000-0000-0000-0000-000000000001,demo-video-1,demo-comment-1,演示评论：可以讲讲线程池吗？,,2026-10-10T10:00:00Z,DEMO_MANUAL
+00000000-0000-0000-0000-000000000001,demo-video-1,demo-comment-1,演示评论：可以讲讲线程池吗？,,2026-10-11T10:00:00Z,DEMO_MANUAL
+00000000-0000-0000-0000-000000000001,demo-video-1,demo-comment-1,演示冲突：改为 Redis 问题,,2026-10-10T10:00:00Z,DEMO_MANUAL
+00000000-0000-0000-0000-000000000001,demo-video-1,demo-comment-2,,,2026-10-10T10:00:00Z,DEMO_MANUAL
+00000000-0000-0000-0000-000000000001,demo-video-1,demo-comment-3,演示坏时间,not-a-time,2026-10-10T10:00:00Z,DEMO_MANUAL

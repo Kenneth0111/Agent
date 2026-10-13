@@ -53,7 +53,7 @@ class GenerationServiceTest {
         when(content.startRun(7, "account-1", "TOPICS"))
                 .thenReturn(new GenerationRun("run-1", "account-1", "TOPICS", "RUNNING", 0, null, null));
         when(materials.find(7, "m-1")).thenReturn(Optional.of(material));
-        when(model.replyJson(any())).thenReturn("""
+        when(model.replyJson(eq(7L), any(), any())).thenReturn("""
                 {"column":"Java 面试","title":"volatile 快问快答","audience":"程序员",
                 "angle":"并发可见性","hook":"volatile 能保证什么？","outline":"问题、简答、解释、示例和追问",
                 "sourceIds":["m-1"],"rationale":"根据规范片段"}
@@ -67,7 +67,7 @@ class GenerationServiceTest {
 
         assertThat(run.status()).isEqualTo("SUCCEEDED");
         var prompt = ArgumentCaptor.forClass(String.class);
-        verify(model).replyJson(prompt.capture());
+        verify(model).replyJson(eq(7L), eq("run-1"), prompt.capture());
         assertThat(prompt.getValue()).contains("资料 ID：m-1", "Java 面试", "不要虚构来源");
         verify(content).saveTopic(eq(7L), eq("account-1"), any(), eq(Set.of("m-1")));
     }
@@ -88,7 +88,7 @@ class GenerationServiceTest {
 
         assertThat(run.errorCode()).isEqualTo("MATERIAL_NOT_FOUND");
         assertThat(run.failedNode()).isEqualTo("retrieveEvidence");
-        verify(model, never()).replyJson(any());
+        verify(model, never()).replyJson(eq(7L), any(), any());
     }
 
     @Test
@@ -100,7 +100,7 @@ class GenerationServiceTest {
                 "开头、短材料、表达、收尾", List.of("m-1"), "用户提供");
         when(content.findTopic(7, "topic-1")).thenReturn(Optional.of(new SavedTopic("topic-1", "account-1", topic)));
         when(materials.find(7, "m-1")).thenReturn(Optional.of(material));
-        when(model.replyJson(any())).thenReturn("""
+        when(model.replyJson(eq(7L), any(), any())).thenReturn("""
                 {"spokenText":"开头：今天练短材料。断句后跟读，最后复述。", "shootingNotes":"口播并配字幕；用户提供资料，仅练习使用", "sourceIds":["m-1"]}
                 """);
         when(content.saveScript(eq(7L), eq("topic-1"), any(), eq(Set.of("m-1")))).thenReturn("script-1");
@@ -112,7 +112,7 @@ class GenerationServiceTest {
 
         assertThat(run.resultId()).isEqualTo("script-1");
         var prompt = ArgumentCaptor.forClass(String.class);
-        verify(model).replyJson(prompt.capture());
+        verify(model).replyJson(eq(7L), eq("run-2"), prompt.capture());
         assertThat(prompt.getValue()).contains("英语跟读", "托福官方评分", "只引用提供的短片段");
     }
 
@@ -122,7 +122,7 @@ class GenerationServiceTest {
         when(content.startRun(7, "account-1", "TOPICS"))
                 .thenReturn(new GenerationRun("run-3", "account-1", "TOPICS", "RUNNING", 0, null, null));
         when(materials.find(7, "m-1")).thenReturn(Optional.of(material));
-        when(model.replyJson(any())).thenReturn("{}");
+        when(model.replyJson(eq(7L), any(), any())).thenReturn("{}");
         when(content.failRun(7, "run-3", "CONTENT_INVALID", "validateDraft", 2))
                 .thenReturn(new GenerationRun("run-3", "account-1", "TOPICS", "FAILED", 2, null,
                         "CONTENT_INVALID", "validateDraft"));
@@ -132,7 +132,8 @@ class GenerationServiceTest {
 
         assertThat(run.failedNode()).isEqualTo("validateDraft");
         assertThat(run.attempts()).isEqualTo(2);
-        org.mockito.Mockito.verify(model, org.mockito.Mockito.times(2)).replyJson(any());
+        org.mockito.Mockito.verify(model, org.mockito.Mockito.times(2))
+                .replyJson(eq(7L), eq("run-3"), any());
         verify(content, never()).saveTopic(org.mockito.ArgumentMatchers.anyLong(), any(), any(), any());
     }
 }
