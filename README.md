@@ -177,6 +177,7 @@ V4/V4.1/V4.2/V4.3 迁移保存选题、脚本、生成运行、失败节点、�
 - [每日开发记录](docs/development-log.md)：实际完成、测试证据、问题及下一步。
 - [里程碑①验收](docs/qa/2026-10-13-w4-acceptance.md)：本机注册到整周备稿、确认和故障演练证据。
 - [自动运行与通知演练](docs/qa/2026-10-13-w6-automatic.md)：本机生成联调、PENDING 恢复修复及真实渠道待验收项。
+- [真实通知配置与验收](docs/notification-acceptance.md)：邮件 / 飞书的工作台字段、测试目标和收件核对步骤。
 - [剩余交付估算](docs/remaining-delivery-estimate.md)：真实通知与云端交付的剩余任务、时间区间和依赖。
 - [需求与实施计划](docs/项目需求与实施计划.md)：已确认范围。
 - [8 周每日清单](docs/superpowers/plans/2026-09-24-agent-daily-development-plan.md)：每日目标及验收标准。
